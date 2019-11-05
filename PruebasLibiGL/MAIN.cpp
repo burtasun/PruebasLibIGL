@@ -1,3 +1,5 @@
+#include "AmbientOcclusionExpanded.h"
+
 #include <igl/avg_edge_length.h>
 #include <igl/per_vertex_normals.h>
 #include <igl/readOFF.h>
@@ -10,29 +12,8 @@
 Eigen::MatrixXd V;
 Eigen::MatrixXi F;
 
-Eigen::VectorXd AO;
-
-
-template <
-	typename DerivedV,
-	typename DerivedF,
-	typename DerivedP,
-	typename DerivedN,
-	typename DerivedS >
-	IGL_INLINE void igl::embree::ambient_occlusion(
-		const Eigen::PlainObjectBase<DerivedV> & V,
-		const Eigen::PlainObjectBase<DerivedF> & F,
-		const Eigen::PlainObjectBase<DerivedP> & P,
-		const Eigen::PlainObjectBase<DerivedN> & N,
-		const int num_samples,
-		Eigen::PlainObjectBase<DerivedS> & S)
-{
-	using namespace Eigen;
-	EmbreeIntersector ei;
-	ei.init(V.template cast<float>(), F.template cast<int>());
-	ambient_occlusion(ei, P, N, num_samples, S);
-}
-
+Eigen::VectorXd AO;//ratio no occlud
+Eigen::MatrixXd VO;//vector no occlud
 
 
 
@@ -88,9 +69,21 @@ int main(int argc, char *argv[])
 	igl::per_vertex_normals(V, F, N);
 
 	// Compute ambient occlusion factor using embree
-	igl::embree::ambient_occlusion(V, F, V, N, 500, AO);
+	//igl::embree::ambient_occlusion(V, F, V, N, 500, AO);
+	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree
+		<
+			decltype(V),
+			decltype(F),
+			decltype(V),
+			decltype(N),
+			decltype(AO),
+			decltype(VO)
+		>
+		(V, F, V, N, 10, AO, VO);
 	AO = 1.0 - AO.array();
-
+	Eigen::IOFormat CleanFmt(4, 0, ", ", "\n", "[", "]");
+	std::cout << VO.format(CleanFmt);
+	std::cout << endl << AO.format(CleanFmt) << endl;
 	// Show mesh
 	igl::opengl::glfw::Viewer viewer;
 	viewer.data().set_mesh(V, F);

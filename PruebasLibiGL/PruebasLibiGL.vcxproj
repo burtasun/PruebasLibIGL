@@ -117,8 +117,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AmbientOcclusionExpanded.cpp" />
     <ClCompile Include="glad.c" />
     <ClCompile Include="MAIN.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AmbientOcclusionExpanded.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
