@@ -117,7 +117,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AmbientOcclusionExpanded.cpp" />
     <ClCompile Include="glad.c" />
     <ClCompile Include="MAIN.cpp" />
   </ItemGroup>
