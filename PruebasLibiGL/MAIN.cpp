@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
 	MatrixXd PFN;
 	igl::per_face_normals(V, F, PFN);
 	AmbientOcclusionExpanded::face_baricentre(V_face, V, F);
-	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V_face, F, V_face, PFN, n_samples_ao, AO_face, VO_face);
+	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V, F, V_face, PFN, n_samples_ao, AO_face, VO_face);
 	AO_face = 1.0 - AO_face.array();
 
 	//Per faces sectorized
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 
 	MatrixXd U_iso;
 	AmbientOcclusionExpanded::iso_parameters(U_iso, V, F);
-	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree_sector(V_face, F, V_face, PFN, U_iso, samples_sectors, AO_face_sect, VO_face_sect);
+	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree_sector(V, F, V_face, PFN, U_iso, samples_sectors, AO_face_sect, VO_face_sect);
 	AO_face_sect = 1.0 - AO_face_sect.array();
 
 
