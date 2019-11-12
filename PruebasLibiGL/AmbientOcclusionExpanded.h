@@ -224,38 +224,41 @@ namespace AmbientOcclusionExpanded
 			const Vector3f normal = N.row(p).template cast<float>();
 			const Vector3f u_iso = U.row(p).template cast<float>();
 
-			int num_hits = 0;
-
-			Vector3f v_prim_iso = normal.cross(u_iso).normalized();
+			//Vector3f v_prim_iso = normal.cross(u_iso).normalized();
+			//Matrix3f RotSampl;
+			//RotSampl <<
+			//	u_iso(0), v_prim_iso(0), normal(0),
+			//	u_iso(1), v_prim_iso(1), normal(1),
+			//	u_iso(2), v_prim_iso(2), normal(2);
+			Vector3f x_vect_rot = Vector3f::UnitY().cross(normal);
+			Vector3f y_vect_rot = normal.cross(x_vect_rot);
 			Matrix3f RotSampl;
 			RotSampl <<
-				u_iso(0), v_prim_iso(0), normal(0),
-				u_iso(1), v_prim_iso(1), normal(1),
-				u_iso(2), v_prim_iso(2), normal(2);
-
-			Vector3f VectNoOcclud(0, 0, 0);
+				x_vect_rot(0), y_vect_rot(0), normal(0),
+				x_vect_rot(1), y_vect_rot(1), normal(1),
+				x_vect_rot(2), y_vect_rot(2), normal(2);
 
 			//int invert = 0;
-			for (int s = 0; s < num_samples; s++)
+			for (int sect = 0; sect < num_sectors; sect++)
 			{
-				for (int sect = 0; sect < num_sectors; sect++) {
+				Vector3f VectNoOcclud(0, 0, 0);
+				int num_hits = 0, invert = 0;
+				for (int s = 0; s < num_samples; s++)
+				{
 					Vector3f d = RotSampl * samples.block(s, sect * 3, 1, 3).transpose();
-					//if (d.dot(normal) < 0) {
-					//	d *= -1;
-					//	invert++;
-					//}
+					if (d.dot(normal) < 0) {
+						d *= -1;
+						invert++;
+					}
 					if (shoot_ray(origin, d))
 						num_hits++;
 					else
 						VectNoOcclud = VectNoOcclud + d.normalized();
 				}
+				S(p, sect) = (float)num_hits / (float)num_samples;
+				if (num_samples != num_hits)
+					VO.block(p, 3 * sect, 1, 3) = (VectNoOcclud / (num_samples - num_hits)).transpose().normalized().cast<float>();
 			}
-			//debug
-			//cout << "nits\t" << num_hits << "\t\tninverts\t" << invert << endl << RotSampl.format(CleanFmt) << endl << endl << endl;
-			S(p) = (double)num_hits / (double)num_samples;
-			auto a = (VectNoOcclud.normalized() / (num_samples - num_hits)).cast<RowVector3d>();
-			if (num_samples != num_hits)
-				VO.row(p) = (VectNoOcclud / (num_samples - num_hits)).transpose().normalized().cast<double>();
 		};
 		igl::parallel_for(n, inner, 1000);
 		return true;
