@@ -94,27 +94,32 @@ int main(int argc, char *argv[])
 		"Press . to turn up lighting" << endl <<
 		"Press , to turn down lighting" << endl;
 
-	bool res = igl::readOFF("Recursos/fertility.off", V, F);
+	if (argc != 6) { cerr << "number of arguments is not 3" << endl; return EXIT_FAILURE; }
+
+	bool res = igl::readOBJ(argv[1], V, F);
+	if (!res) { cerr << "error while reading the mesh" << endl; return EXIT_FAILURE; }
 	cout << "V.rows()\t" << V.rows() << endl << "F.rows()\t" << F.rows() << endl;
+
+	int n_samples_ao = atoi(argv[5]);
 
 	//Per vertex
 	MatrixXd N;
 	igl::per_vertex_normals(V, F, N);
-	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V, F, V, N, 100, AO, VO);
+	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V, F, V, N, n_samples_ao, AO, VO);
 	AO = 1.0 - AO.array();
 
 	//Per faces
 	MatrixXd PFN;
 	igl::per_face_normals(V, F, PFN);
 	AmbientOcclusionExpanded::face_baricentre(V_face, V, F);
-	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V_face, F, V_face, PFN, 100, AO_face, VO_face);
+	AmbientOcclusionExpanded::ambient_occlusion_expanded_embree(V_face, F, V_face, PFN, n_samples_ao, AO_face, VO_face);
 	AO_face = 1.0 - AO_face.array();
 
 	//Per faces sectorized
 	//	Rejection sampling
-	int n_zenith = 40;//Z 0 - 360 subdiv
-	int m_azimuth = 10;//X 0 - 90 subdiv
-	int n_samples_sector = 5;
+	int n_zenith = atoi(argv[2]);//Z 0 - 360 subdiv
+	int m_azimuth = atoi(argv[3]);//X 0 - 90 subdiv
+	int n_samples_sector = atoi(argv[4]);
 	int tot_samples = n_samples_sector * n_zenith * m_azimuth;
 
 	//		normal sector samples
