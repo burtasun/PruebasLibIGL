@@ -1,6 +1,7 @@
 #include <iostream>
 #include <igl/readOFF.h>
 #include <igl/opengl/glfw/Viewer.h>
+#include <igl/jet.h>
 /*** insert any libigl headers here ***/
 
 #define M_PI 3.14159265359 
@@ -33,13 +34,17 @@ double degree_thresh;
 void vertex_face_adjacency(
     const Eigen::Matrix<double, -1, 3>& V,
     const Eigen::Matrix<int, -1, 3>& F,
-    std::vector<std::vector<int>>& faces_in_vertex/*[vertex][faces]*/)
+    std::vector<std::vector<int>>& faces_in_vertex,/*[vertex][faces]*/
+    std::vector<std::vector<int>>& vertexidx_faces_of_vertex/*[vertex][vertexidx_of_face]*/)
 {
     if (vfcalc) return;
     faces_in_vertex.resize(V.rows());
+    vertexidx_faces_of_vertex.resize(V.rows());
     for (int i = 0; i < F.rows(); i++) {
-        for (int j = 0; j < 3; j++)
+        for (int j = 0; j < 3; j++) {
             faces_in_vertex[F(i, j)].push_back(i);
+            vertexidx_faces_of_vertex[F(i, j)].push_back(j);
+        }
     }
     vfcalc = true;
 }
@@ -86,14 +91,14 @@ void per_face_normals(
     const Eigen::Matrix<int, -1, 3>& F,
     Eigen::Matrix<double, -1, -1>& PFN)
 {
-    if (pfncalc) return;
+    //if (pfncalc) return;
     PFN.resize(F.rows(), 3);
     for (int i = 0; i < F.rows(); i++)
         PFN.row(i) =
             (V.row(F(i, 1)) - V.row(F(i, 0))).cross(/*v1*/
                 (V.row(F(i, 2)) - V.row(F(i, 0)))/*v2*/
             ).normalized();
-    pfncalc = true;
+    //pfncalc = true;
 }
 void face_areas(
     const Eigen::Matrix<double, -1, 3>& V,
@@ -181,19 +186,80 @@ void AA_Cube(const double dim,
     F.row(11) = Eigen::RowVector3i(4, 0, 1);
 }
 
+void face_neighbours(
+    const Eigen::Matrix<int, -1, 3>& F,
+    const vector<vector<int>>& VF,
+    vector<vector<int>>& Fnn
+) {
+    const auto m = F.rows();
+    Fnn.resize(m);
+    for (int i = 0; i < m; i++) {
+        for (int j = 0; j < F.cols(); j++) {
+            for (int k = 0; k < VF[F(i, j)].size(); k++) {
+                auto& f = VF[F(i, j)][k];
+                if (f == i) continue;
+                Fnn[i].push_back(f);
+            }
+        }
+    }
+    for (auto& fs : Fnn) {
+        sort(fs.begin(), fs.end());
+        fs.erase(unique(fs.begin(), fs.end()), fs.end());
+    }
+}
+
+void ConnectedComponentsFaces(
+    const Eigen::Matrix<int, -1, 3>& F,
+    const vector<vector<int>>& Fnn,
+    Eigen::VectorXi& Fid,
+    vector<int>& cnt_id
+) {
+    const auto m = F.rows();
+    Fid.setZero(m);
+    vector<bool> checked(m, false);
+    cnt_id.clear();
+    vector<int> q;
+    int id_curr = -1;
+
+    for (int i = 0; i < m; i++) {
+        if (checked[i]) continue;
+        id_curr++;
+        cnt_id.push_back(0);
+        q.push_back(i);
+        while(!q.empty()){
+            auto f_curr = q.front(); q.erase(q.begin());
+            if (checked[f_curr]) continue;
+            for (int j = 0; j < Fnn[f_curr].size(); j++) {
+                auto& fnn = Fnn[f_curr][j];
+                if (checked[fnn]) continue;
+                q.push_back(fnn);
+            }
+            checked[f_curr] = true;
+            Fid[f_curr] = id_curr;
+            cnt_id[id_curr]++;
+        }
+    }
+    int cnt_tot = 0;
+    for (auto& cnt : cnt_id)
+        cnt_tot += cnt;
+    assert(cnt_tot == m);
+    assert(cnt_id.size() == id_curr);
+}
+
+
 bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     if (key == '1') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         // Add your code for computing vertex to face relations here;
         // store in VF,VFi.
-        vertex_face_adjacency(V, F, VF);
+        vertex_face_adjacency(V, F, VF, VFi);
         showidx(VF);
     }
 
     if (key == '2') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         // Add your code for computing vertex to vertex relations here:
         // store in VV.
         vertex_vertex_adjacency<true>(V, F, VV);
@@ -201,8 +267,8 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     }
 
     if (key == '3') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         FN.setZero(F.rows(),3);
         // Add your code for computing per-face normals here: store in FN.
         per_face_normals(V, F, FN);
@@ -212,11 +278,11 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     }
 
     if (key == '4') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         // Add your code for computing per-vertex normals here: store in VN.
         face_areas(V, F, FArea);
-        vertex_face_adjacency(V, F, VF);
+        vertex_face_adjacency(V, F, VF, VFi);
         per_face_normals(V, F, FN);
         cout << "FN10\t" << FN.row(10) << endl;
         per_vertex_normals(V, VF, FN, FArea, VN);
@@ -225,10 +291,10 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     }
 
     if (key == '5') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         // Add your code for computing per-corner normals here: store in CN.
-        vertex_face_adjacency(V, F, VF);
+        vertex_face_adjacency(V, F, VF, VFi);
         per_face_normals(V, F, FN);
         per_corner_normals(V, F, VF, FN, degree_thresh, CN);
         //Set the viewer normals
@@ -236,15 +302,23 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     }
 
     if (key == '6') {
-        //viewer.data().clear();
-        //viewer.data().set_mesh(V, F);
+        viewer.data().clear();
+        viewer.data().set_mesh(V, F);
         component_colors_per_face.setZero(F.rows(),3);
         // Add your code for computing per-face connected components here:
         // store the component labels in cid.
+        vector<vector<int>> Fnn;
+        vertex_face_adjacency(V, F, VF, VFi);
+        face_neighbours(F, VF, Fnn);
+        Eigen::VectorXi Fid;
+        vector<int> cnt_id;
+        ConnectedComponentsFaces(F, Fnn, Fid, cnt_id);
+        cout << "Cnt_id\t" << cnt_id.size() << endl;
+        for (auto& cnt : cnt_id) cout << '\t' << cnt << endl;
 
         // Compute colors for the faces based on components, storing them in
         // component_colors_per_face.
-
+        igl::jet(Fid, true, component_colors_per_face);
         // Set the viewer colors
         viewer.data().set_colors(component_colors_per_face);
     }
