@@ -4,7 +4,8 @@
 #include <igl/jet.h>
 /*** insert any libigl headers here ***/
 
-#define M_PI 3.14159265359 
+# define M_PI 3.14159265358979323846
+#define M_PI2 2*M_PI
 using namespace std;
 using Viewer = igl::opengl::glfw::Viewer;
 
@@ -56,7 +57,7 @@ void vertex_vertex_adjacency(
     const Eigen::Matrix<int, -1, 3>& F,
     std::vector<std::vector<int>>& vertex_neighbours/*[vertex][vertex]*/)
 {
-    if (vvcalc)return;
+    //if (vvcalc)return;
     vertex_neighbours.resize(V.rows());
     for (int i = 0; i < F.rows(); i++) {
         //0 12
@@ -75,7 +76,7 @@ void vertex_vertex_adjacency(
             vec.erase(unique(vec.begin(), vec.end()), vec.end());
         }
     }
-    vvcalc = true;
+    //vvcalc = true;
 }
 void showidx(vector<vector<int>>& idx) {
     for (int i = 0; i < idx.size(); i++) {
@@ -208,6 +209,88 @@ void face_neighbours(
     }
 }
 
+void face_barycenters(
+    const Eigen::Matrix<double, -1, 3>& V,
+    const Eigen::Matrix<int, -1, 3>& F,
+    Eigen::Matrix<double, -1, 3>& V_m
+) {
+    const auto m = F.rows();
+    V_m.setZero(m, 3);
+    for (int i = 0; i < m; i++)
+        V_m.row(i) = (V.row(F(i, 0)) + V.row(F(i, 1)) + V.row(F(i, 2))) / 3;
+}
+
+void barycenter_faces(
+    const Eigen::Matrix<double, -1, 3>& V,
+    const Eigen::Matrix<int, -1, 3>& F,
+    Eigen::Matrix<int, -1, 3>& F_m/*F_m dim = 3 * F dim */
+) {
+    /*
+        F       =>  0 - m-1      //      V          (n)
+        F_m     =>  0 - 3m-1     //      V & V_m    (n+m)
+    */
+    const auto m = F.rows();
+    const auto n = V.rows();
+    F_m.setZero(3 * m, 3);
+    for (int i = 0; i < m; i++) //012 => 01x 12x 20x // x = n + i        
+        F_m.block<3, 3>(i * 3, 0) <<
+            F(i, 0), F(i, 1), (n + i),
+            F(i, 1), F(i, 2), (n + i),
+            F(i, 2), F(i, 0), (n + i);
+}
+
+void averaged_positions(
+    const Eigen::Matrix<double, -1, 3>& V,
+    const vector<vector<int>>& VV,
+    Eigen::Matrix<double, -1, 3>& P
+) {
+    const auto m = V.rows();
+    P.setZero(m, 3);
+    double an = 0.0;
+    for (int i = 0; i < m; i++) {
+        auto nv = VV[i].size();
+        an = (4.0 - 2.0 * cos(M_PI2 / static_cast<double>(nv))) / 9.0;
+        for (int j = 0; j < nv; j++)
+            P.row(i) += V.row(VV[i][j]);
+        P.row(i) = (1 - an) * V.row(i) + (an/nv) * P.row(i);
+    }
+}
+
+/*Subdivision_sqrt3*/
+void Subdivision_sqrt3(
+    const Eigen::Matrix<double, -1, 3> &V,
+    const Eigen::Matrix<int, -1, 3> &F,
+    const vector<vector<int>> &VV,
+    Eigen::Matrix<double,-1,3> &VSubdiv,
+    Eigen::Matrix<int, -1, 3>& FSubdiv
+) {
+    Eigen::Matrix<double, -1, 3> V_m;
+    face_barycenters(V, F, V_m);
+    Eigen::Matrix<int, -1, 3> F_prim_prim;
+    barycenter_faces(V, F, F_prim_prim);
+    cout << "-------------F-------------\n" << F << "\n--------------------------\n--------------------------\n";
+    cout << "-------------F_prim-------------\n" << F_prim_prim << "\n--------------------------\n--------------------------\n";
+    Eigen::Matrix<double, -1, 3> P;
+    averaged_positions(V, VV, P);    
+    Eigen::Matrix<double, -1, 3> V_prim;//V=[P,V_m]
+    V_prim.resize(P.rows() + V_m.rows(), 3);
+    V_prim.block(0, 0, P.rows(), 3) = P;
+    V_prim.block(P.rows(), 0, V_m.rows(), 3) = V_m;
+    cout << "-------------V-------------\n" << V << "\n--------------------------\n--------------------------\n";
+    cout << "-------------P-------------\n" << P << "\n--------------------------\n--------------------------\n";
+    cout << "-------------V_m-------------\n" << V_m << "\n--------------------------\n--------------------------\n";
+    cout << "-------------V_prim-------------\n" << V_prim << "\n--------------------------\n--------------------------\n";
+
+
+
+
+
+
+
+    FSubdiv = F_prim_prim;
+    VSubdiv = V_prim;
+}
+
 void ConnectedComponentsFaces(
     const Eigen::Matrix<int, -1, 3>& F,
     const vector<vector<int>>& Fnn,
@@ -324,12 +407,12 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers) {
     }
 
     if (key == '7') {
-        Eigen::MatrixXd Vout=V;
-        Eigen::MatrixXi Fout=F;
         // Add your code for sqrt(3) subdivision here.
-
+        vertex_vertex_adjacency<true>(V, F, VV);
+        Eigen::MatrixX3d V_subdiv; Eigen::MatrixX3i F_subdiv;
+        Subdivision_sqrt3(V, F, VV, V_subdiv, F_subdiv);
         // Set up the viewer to display the new mesh
-        V = Vout; F = Fout;
+        V = V_subdiv; F = F_subdiv;
         viewer.data().clear();
         viewer.data().set_mesh(V, F);
     }
