@@ -184,15 +184,25 @@ Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
 struct grid3d {
     vector<vector<int>> grid;
     double res;
-    union {
-        struct { double minx, miny, minz; };
-        double minxyz[3];
-    }min;
-    union {
-        struct { unsigned binsx, binsy, binsz; };
-        int binsxyz[3];
-    }bin;
+    template<typename T> union v3 {
+        struct { T x, y, z; };
+        T xyz[3];
+    };
+    v3<double> min;
+    v3<double> max;
+    v3<int> bin;
 };
+
+
+void find_closest(
+    const grid3d& grid,
+    const Eigen::RowVector3d& p,
+    int &idx
+) {
+    //Simplest case
+
+    //Outside of bb
+}
 
 //Builds a 3d grid with the vertex idx in each node
 void spatial_indexer_3dgrid(
@@ -207,12 +217,15 @@ void spatial_indexer_3dgrid(
     grid.res = resolution;
     //Grid formatting
     //  inner => X / middle => Y / outter => Z
-    for(int i=0;i<3;i++)
-        grid.bin.binsxyz[i] = std::ceil(bblength[i] / grid.res) + 1;
-    grid.grid.resize(grid.bin.binsx * grid.bin.binsy * grid.bin.binsz);
+    for (int i = 0; i < 3; i++) {
+        grid.bin.xyz[i] = std::ceil(bblength[i] / grid.res) + 1;
+        grid.min.xyz[i] = bb(0, i);
+        grid.max.xyz[i] = bb(1, i);
+    }
+    grid.grid.resize(grid.bin.x * grid.bin.y * grid.bin.z );
 
     const double xmin = bb(0, 0), ymin = bb(0, 1), zmin = bb(0, 2);
-    const int nx = grid.bin.binsx, ny = grid.bin.binsy, nz = grid.bin.binsz;
+    const int nx = grid.bin.x, ny = grid.bin.y, nz = grid.bin.z;
 
     const Eigen::RowVector3d min(bb.block<1, 3>(0, 0));
     Eigen::MatrixX3i Vidx = ((V - min.replicate(V.rows(), 1)) / grid.res).cast<int>();
@@ -221,16 +234,16 @@ void spatial_indexer_3dgrid(
     for (int i = 0; i < m; i++)
         grid.grid[Vidx(i, 0) + nx * Vidx(i, 1) + nx * nz * Vidx(i, 2)].push_back(i);    
 
-    //cout << "print grid\n";
-    //for (int i = 0; i < nz; i++) {
-    //    for (int j = 0; j < ny; j++) {
-    //        for (int k = 0; k < nx; k++) {
-    //            cout << endl << i << ',' << j << ',' << k << '\t';
-    //            for (auto elem : grid.grid[i + nx * j + nx * nz * k])
-    //                cout << elem << '\t';
-    //        }
-    //    }
-    //}
+    cout << "print grid\n";
+    for (int i = 0; i < nz; i++) {
+        for (int j = 0; j < ny; j++) {
+            for (int k = 0; k < nx; k++) {
+                cout << endl << i << ',' << j << ',' << k << '\t';
+                for (auto elem : grid.grid[i + nx * j + nx * nz * k])
+                    cout << elem << '\t';
+            }
+        }
+    }
 
 }
 
