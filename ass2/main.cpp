@@ -194,14 +194,47 @@ struct grid3d {
 };
 
 
-void find_closest(
+/*@TODO
+    Outside of grid search
+    Outside of bin search*/
+bool find_closest(
+    const Eigen::MatrixX3d &P,
     const grid3d& grid,
     const Eigen::RowVector3d& p,
     int &idx
 ) {
-    //Simplest case
+    bool inside = true;
+    for (int i = 0; i < 3; i++)
+        inside &= (p[i] > grid.min.xyz[i])& (p[i] < grid.max.xyz[i]);
+    if (!inside)
+        return false;
 
-    //Outside of bb
+    //Inside grid
+    //  inside bin
+    Eigen::RowVector3d pmin(p - Eigen::Map<Eigen::RowVector3d>((double*)grid.min.xyz, 3));
+    Eigen::RowVector3i binp = (pmin/grid.res).cast<int>();
+    const auto &nx = grid.bin.x, & ny(grid.bin.y), & nz(grid.bin.z);
+    const auto gridat = [&](int i, int j, int k) -> vector<int> {
+        return grid.grid[i + j * grid.bin.x + k * grid.bin.x * grid.bin.y];
+    };
+    double mindist = std::numeric_limits<double>::max();
+    const auto testbin = [&](const vector<int>& idx, const Eigen::RowVector3d& pt)->int {
+        for (auto& pijk : idx) {
+            double dist(abs((P.row(pijk) - pt).norm));
+            if (dist < mindist) {
+                mindist = dist;
+                return pijk;
+            }
+        }
+        return -1;
+    };
+    auto binn = gridat(binp[0], binp[1], binp[2]);
+    if (binn.size()) {
+        idx = testbin(binn, p); 
+        return true;
+    }
+    else //inside grid, outside bin
+        return false;
 }
 
 //Builds a 3d grid with the vertex idx in each node
