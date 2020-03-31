@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_PropertySheetDisplayName>LibIGLRel</_PropertySheetDisplayName>
+    <IncludePath>C:\Users\burtasun\source\librerias\libigl\include;C:\vcpkg\installed\x64-windows\include;C:\Users\burtasun\source\librerias\libigl-imgui;C:\Users\burtasun\source\librerias\imgui\;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\Users\burtasun\source\librerias\libigl-imgui\out\build\x64-Release;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_MBCS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>imgui.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup />
+</Project>
