@@ -175,6 +175,44 @@ Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
     return BB;
 }
 
+
+/*@TODO
+    Query closest
+    Query n closest
+    Query n in radius
+    */
+struct grid3d {
+    vector<vector<int>> grid;
+    double res;
+    union {
+        struct { double minx, miny, minz; };
+        double minxyz[3];
+    }min;
+    union {
+        struct { unsigned binsx, binsy, binsz; };
+        int binsxyz[3];
+    }bin;
+};
+
+//Builds a 3d grid with the vertex idx in each node
+void spatial_indexer_3dgrid(
+    const Eigen::MatrixX3d& V,
+    const double factor,
+    grid3d grid
+) {
+    //determine the resolution
+    auto bb = AABB(V);
+    Eigen::RowVector3d bblength(bb.block<1, 3>(0, 0) - bb.block<1, 3>(1, 0));
+    auto resolution = bblength.minCoeff() / factor;
+    grid.res = resolution;
+    //Grid formatting
+    //  inner => X / middle => Y / outter => Z
+    for(int i=0;i<3;i++)
+        grid.bin.binsxyz[i] = std::ceil(bblength[i] / grid.res) + 1;
+    grid.grid.resize(grid.bin.binsx * grid.bin.binsy * grid.bin.binsz);
+}
+
+
 /*TODO iterate epsilon making it smaller enough*/
 void add_constraints(
     const Eigen::MatrixX3d& V,
