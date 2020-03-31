@@ -198,11 +198,11 @@ struct grid3d {
 void spatial_indexer_3dgrid(
     const Eigen::MatrixX3d& V,
     const double factor,
-    grid3d grid
+    grid3d &grid
 ) {
     //determine the resolution
     auto bb = AABB(V);
-    Eigen::RowVector3d bblength(bb.block<1, 3>(0, 0) - bb.block<1, 3>(1, 0));
+    Eigen::RowVector3d bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
     auto resolution = bblength.minCoeff() / factor;
     grid.res = resolution;
     //Grid formatting
@@ -210,6 +210,28 @@ void spatial_indexer_3dgrid(
     for(int i=0;i<3;i++)
         grid.bin.binsxyz[i] = std::ceil(bblength[i] / grid.res) + 1;
     grid.grid.resize(grid.bin.binsx * grid.bin.binsy * grid.bin.binsz);
+
+    const double xmin = bb(0, 0), ymin = bb(0, 1), zmin = bb(0, 2);
+    const int nx = grid.bin.binsx, ny = grid.bin.binsy, nz = grid.bin.binsz;
+
+    const Eigen::RowVector3d min(bb.block<1, 3>(0, 0));
+    Eigen::MatrixX3i Vidx = ((V - min.replicate(V.rows(), 1)) / grid.res).cast<int>();
+    
+    const auto m = V.rows();
+    for (int i = 0; i < m; i++)
+        grid.grid[Vidx(i, 0) + nx * Vidx(i, 1) + nx * nz * Vidx(i, 2)].push_back(i);    
+
+    //cout << "print grid\n";
+    //for (int i = 0; i < nz; i++) {
+    //    for (int j = 0; j < ny; j++) {
+    //        for (int k = 0; k < nx; k++) {
+    //            cout << endl << i << ',' << j << ',' << k << '\t';
+    //            for (auto elem : grid.grid[i + nx * j + nx * nz * k])
+    //                cout << elem << '\t';
+    //        }
+    //    }
+    //}
+
 }
 
 
@@ -269,7 +291,8 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         // Add your code for evaluating the implicit function at the grid points
         // Add code for displaying points and lines
         // You can use the following example:
-
+        grid3d grid;
+        spatial_indexer_3dgrid(P, 5, grid);
         /*** begin: sphere example, replace (at least partially) with your code ***/
         // Make grid
         createGrid();
@@ -348,7 +371,7 @@ int main(int argc, char *argv[]) {
 		  igl::readOFF(argv[1],P,F,N);
 	  }
 
-    Viewer viewer;
+     Viewer viewer;
     igl::opengl::glfw::imgui::ImGuiMenu menu;
     viewer.plugins.push_back(&menu);
 
