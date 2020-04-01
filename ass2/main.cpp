@@ -177,107 +177,169 @@ Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
 
 
 /*@TODO
-    Query closest
     Query n closest
     Query n in radius
     */
 struct grid3d {
+public:
     vector<vector<int>> grid;
     double res;
-    template<typename T> union v3 {
-        struct { T x, y, z; };
-        T xyz[3];
+    Eigen::RowVector3d min;//bb
+    Eigen::RowVector3d max;//bb
+    Eigen::RowVector3i bin;//nx ny nz
+    inline bool inside(const Eigen::RowVector3d& p)const  {
+        bool inside = true;
+        for (int i = 0; i < 3; i++)
+            inside &= (p[i] > min[i])& (p[i] < max[i]);
+        return inside;
+    }; 
+    inline int atidx(int x, int y, int z) const {
+        return x + y*bin[0] + z*bin[0]*bin[1];
     };
-    v3<double> min;
-    v3<double> max;
-    v3<int> bin;
+    const vector<int>& at(int i, int j, int k) const {
+        return grid[atidx(i,j,k)];
+    };
+
+    bool at(const Eigen::RowVector3d &p, vector<int>& binp) const {
+        Eigen::RowVector3i pcomp = ((p - min) / res).cast<int>();
+        if (!inside(p))
+            return false;
+        binp = this->at(pcomp[0], pcomp[1], pcomp[2]);
+        vector<int> v;
+        return true;
+    };
 };
 
 
 /*@TODO
-    Outside of grid search
-    Outside of bin search*/
+    Fine grained outside of grid search*/
+template<bool aprox>
 bool find_closest(
     const Eigen::MatrixX3d &P,
     const grid3d& grid,
     const Eigen::RowVector3d& p,
-    int &idx
+    int &idxclosest,
+    double& distclosest
 ) {
-    bool inside = true;
-    for (int i = 0; i < 3; i++)
-        inside &= (p[i] > grid.min.xyz[i])& (p[i] < grid.max.xyz[i]);
-    if (!inside)
-        return false;
+    double mindist = numeric_limits<double>::max();
 
-    //Inside grid
-    //  inside bin
-    Eigen::RowVector3d pmin(p - Eigen::Map<Eigen::RowVector3d>((double*)grid.min.xyz, 3));
-    Eigen::RowVector3i binp = (pmin/grid.res).cast<int>();
-    const auto &nx = grid.bin.x, & ny(grid.bin.y), & nz(grid.bin.z);
-    const auto gridat = [&](int i, int j, int k) -> vector<int> {
-        return grid.grid[i + j * grid.bin.x + k * grid.bin.x * grid.bin.y];
-    };
-    double mindist = std::numeric_limits<double>::max();
-    const auto testbin = [&](const vector<int>& idx, const Eigen::RowVector3d& pt)->int {
-        for (auto& pijk : idx) {
-            double dist(abs((P.row(pijk) - pt).norm));
+    const auto bruteforce_closest = [&](const Eigen::RowVector3d& pt)->int {
+        int idx = -1;
+        const auto m = P.rows();
+        for (int i = 0; i < m; i++) {
+            double dist = abs((pt - P.row(i)).norm());
             if (dist < mindist) {
-                mindist = dist;
-                return pijk;
+                mindist = dist;//avoiding conditional jumps
+                idx = i;
             }
         }
-        return -1;
+        return idx;
     };
-    auto binn = gridat(binp[0], binp[1], binp[2]);
-    if (binn.size()) {
-        idx = testbin(binn, p); 
-        return true;
+    bool inside = grid.inside(p);
+    if (!inside) {
+        idxclosest = bruteforce_closest(p);
+        distclosest = mindist;
+        return idxclosest !=-1;
     }
-    else //inside grid, outside bin
-        return false;
+
+    //Inside grid
+    Eigen::RowVector3i binp = ((p-grid.min)/grid.res).cast<int>();
+    //returns closest idx, leaves unchanged otherwise
+    const auto testbin = [&](const vector<int>& idx, const Eigen::RowVector3d& pt, int &id) {
+        for (auto pijk : idx) {
+            double dist(abs((P.row(pijk) - pt).norm()));
+            if (dist < mindist) {
+                mindist = dist;
+                id = pijk;
+            }
+        }
+    };
+    auto binn = grid.at(binp[0], binp[1], binp[2]);
+    if (aprox && binn.size()) {//assumes closest is in the same bin
+        testbin(binn, p, idxclosest);
+        distclosest = mindist;
+        return idxclosest != -1;
+    }
+    //at least 1 neighbour in the vicinity to interrupt iteration by increasing bin voxel dimensions
+    int idx = -1;
+    int n = 1;//2n+1 voxel dimension
+    Eigen::RowVector3i minvox, maxvox;
+    while (n<10/*@todo define stop criteria not found*/) {
+        for (int i = 0; i < 3; i++) {
+            minvox[i] = ((binp[i] - n) > 0 ? (binp[i] - n) : 0);
+            maxvox[i] = ((binp[i] + n) < grid.bin[i]) ? (binp[i] + n) : grid.bin[i] - 1;
+        }
+        for (int i = minvox[0]; i <= maxvox[0]; i++) {
+            for (int j = minvox[1]; j <= maxvox[1]; j++) {
+                for (int k = minvox[2]; k <= maxvox[2]; k++) {
+                    if (grid.at(i, j, k).size())
+                        testbin(grid.at(i, j, k), p, idx);
+                }//k
+            }//j
+        }//i
+        if (idx != -1)
+            break;
+        n++;
+    }
+    idxclosest = idx;
+    distclosest = mindist;    
+    return idxclosest != -1;
 }
 
 //Builds a 3d grid with the vertex idx in each node
+template<bool saveVgridIdx> //compile time branch
 void spatial_indexer_3dgrid(
     const Eigen::MatrixX3d& V,
     const double factor,
-    grid3d &grid
+    grid3d &grid,
+    Eigen::MatrixX2i &VgridIdx
 ) {
     //determine the resolution
     auto bb = AABB(V);
     Eigen::RowVector3d bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
-    auto resolution = bblength.minCoeff() / factor;
+    double resolution = bblength.minCoeff() / factor;
     grid.res = resolution;
     //Grid formatting
     //  inner => X / middle => Y / outter => Z
     for (int i = 0; i < 3; i++) {
-        grid.bin.xyz[i] = std::ceil(bblength[i] / grid.res) + 1;
-        grid.min.xyz[i] = bb(0, i);
-        grid.max.xyz[i] = bb(1, i);
+        grid.bin[i] = std::ceil(bblength[i] / grid.res) + 1;
+        grid.min[i] = bb(0, i);
+        grid.max[i] = bb(1, i);
     }
-    grid.grid.resize(grid.bin.x * grid.bin.y * grid.bin.z );
+    grid.grid.resize(grid.bin[0] * grid.bin[1] * grid.bin[2] );
+    //for (auto& bin : grid.grid)
+    //    bin.reserve(20);
 
     const double xmin = bb(0, 0), ymin = bb(0, 1), zmin = bb(0, 2);
-    const int nx = grid.bin.x, ny = grid.bin.y, nz = grid.bin.z;
+    const int nx = grid.bin[0], ny = grid.bin[1], nz = grid.bin[2];
 
     const Eigen::RowVector3d min(bb.block<1, 3>(0, 0));
     Eigen::MatrixX3i Vidx = ((V - min.replicate(V.rows(), 1)) / grid.res).cast<int>();
-    
+    if (saveVgridIdx)
+        VgridIdx.setZero(V.rows(),2);
     const auto m = V.rows();
-    for (int i = 0; i < m; i++)
-        grid.grid[Vidx(i, 0) + nx * Vidx(i, 1) + nx * nz * Vidx(i, 2)].push_back(i);    
-
+    for (int i = 0; i < m; i++) {
+        int idx = Vidx(i, 0) + Vidx(i, 1)*nx + Vidx(i, 2)*nx*ny ;
+        grid.grid[idx].push_back(i);
+        if (saveVgridIdx) {
+            VgridIdx(i, 0) = idx;
+            VgridIdx(i, 1) = grid.grid[idx].size() - 1;
+        }
+    }
+#ifdef DEBUG
     cout << "print grid\n";
-    for (int i = 0; i < nz; i++) {
-        for (int j = 0; j < ny; j++) {
-            for (int k = 0; k < nx; k++) {
-                cout << endl << i << ',' << j << ',' << k << '\t';
-                for (auto elem : grid.grid[i + nx * j + nx * nz * k])
+    for (int z = 0; z < nz; z++) {
+        for (int y = 0; y < ny; y++) {
+            for (int x = 0; x < nx; x++) {
+                cout << endl << x << ',' << y << ',' << z << '\t';
+                for (auto elem : grid.grid[x + y*nx + z*nx*ny])
                     cout << elem << '\t';
             }
         }
     }
-
+#endif // DEBUG
+    //for (auto& bin : grid.grid)
+    //    bin.shrink_to_fit();
 }
 
 
@@ -291,15 +353,65 @@ void add_constraints(
     assert(V.rows() == N.rows());
 
     const auto m = V.rows();
-    Vconstr.resize(m * 3, 3);
+    
 
     N_norm = N.rowwise().normalized();
 
     auto bb = AABB(V);
     double Epsilon = 0.01 * abs((bb.block<1, 3>(0, 0) - bb.block<1, 3>(1, 0)).norm());//Epsilon 1/100th of bb diagonal
-    Vconstr.block(0, 0, m, 3) = V;
-    Vconstr.block(m, 0, m, 3) = V + N_norm * Epsilon;
-    Vconstr.block(2*m, 0, m, 3) = V - N_norm * Epsilon;
+
+    //Epsilon fine tuning
+    //  Assuming grid res > Epsilon => closest only in the same bin
+    Eigen::MatrixX3d Vconstrloc;
+    Vconstrloc.resize(m * 3, 3);
+
+    double mindist = numeric_limits<double>::max();
+    bool keepgoing = true;
+    double average_points_per_bin = 5;
+    grid3d grid;
+    int factor_subdivision_grid = 2;
+    while(true)
+    {
+        grid = grid3d();
+        Eigen::MatrixX2i VgridIdx;
+        spatial_indexer_3dgrid<false>(V, factor_subdivision_grid, grid, VgridIdx);
+        int cnt_noempty = 0, cnt = 0;
+        for (auto& bin : grid.grid) {
+            if (bin.size()) { cnt_noempty++; cnt += bin.size(); }
+        }
+        if (((double)cnt / (double)cnt_noempty) < average_points_per_bin)
+            break;
+#ifdef DEBUG
+        cout << "factor_subdivision_grid\t" << factor_subdivision_grid << "\t\tcnt_noempty\t" << cnt_noempty << "\t\tcnt\t" << cnt << endl;
+#endif // DEBUG
+        factor_subdivision_grid++;        
+    }
+    
+    std::cout << "Epsilon " << Epsilon << endl;
+    Vconstrloc.block(0, 0, m, 3) = V;
+    const auto iterclosest = [&](int offset)
+    {
+        while (keepgoing)
+        {
+            Vconstrloc.block(m, 0, m, 3) = V + N_norm * Epsilon;
+            Vconstrloc.block(2 * m, 0, m, 3) = V - N_norm * Epsilon;
+            double distclosest; int idxclosest = -1;
+            keepgoing = false;
+            for (int i = 0; i < m; i++) {
+                find_closest<false>(V, grid, Vconstrloc.row(offset + i), idxclosest, distclosest);
+                if (idxclosest != i) {
+                    Epsilon /= 2; keepgoing = true;
+                    break;
+                }
+            }
+        }
+    };
+    iterclosest(m);//+epsilon*N
+    keepgoing = true;
+    iterclosest(2 * m);//-epsilon*N
+    Vconstr = std::move(Vconstrloc);
+    std::cout << "EpsilonEnd " << Epsilon << endl;
+    
 }
 
 
@@ -338,7 +450,10 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         // Add code for displaying points and lines
         // You can use the following example:
         grid3d grid;
-        spatial_indexer_3dgrid(P, 5, grid);
+        {
+            Eigen::MatrixX2i VgridIdx;
+            spatial_indexer_3dgrid<false>(P, 5.0, grid, VgridIdx);
+        }
         /*** begin: sphere example, replace (at least partially) with your code ***/
         // Make grid
         createGrid();
@@ -408,7 +523,7 @@ bool callback_load_mesh(Viewer& viewer,string filename)
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-      cout << "Usage ex2_bin <mesh.off>" << endl;
+      std::cout << "Usage ex2_bin <mesh.off>" << endl;
       igl::readOFF("../data/sphere.off",P,F,N);
     }
 	  else
