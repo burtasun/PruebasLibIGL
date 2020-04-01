@@ -343,7 +343,6 @@ void spatial_indexer_3dgrid(
 }
 
 
-/*TODO iterate epsilon making it smaller enough*/
 void add_constraints(
     const Eigen::MatrixX3d& V,
     const Eigen::MatrixX3d& N,
