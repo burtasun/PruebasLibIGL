@@ -300,9 +300,7 @@ bool find_closest(
 //find_n_radius
 /*@TODO
     outside radius search*/
-template<bool sorted = false>
 bool find_n_radius(
-    const Eigen::MatrixX3d& V,
     const grid3d& grid,
     const Eigen::RowVector3d& p,
     const double radius,
@@ -314,47 +312,37 @@ bool find_n_radius(
         return false;
 
     std::map<int, double> idx_dists;
-
     //coarse search using Manhattan distance
     //number of bins width at grid's resolution
-    auto voxel_dim = static_cast<int>(ceil((2.0 * radius / grid.res)));
-    auto voxeldimsq(voxel_dim * voxel_dim), voxeldimminsq((voxel_dim - 1) * (voxel_dim - 1));
+    auto voxel_dim = static_cast<int>(ceil((radius / grid.res)));
+    
+    int voxeldimminsq = ((voxel_dim-2)<0) ? 0 : ((voxel_dim - 2)* (voxel_dim - 2));
+
     Eigen::RowVector3i minvox, maxvox;
+    double radiussqr = radius * radius;
     grid.truncated_voxel(p, voxel_dim, minvox, maxvox);
     Eigen::RowVector3i binp(grid.binpoint(p));
     for (int i = minvox[0]; i <= maxvox[0]; i++) {
         for (int j = minvox[1]; j <= maxvox[1]; j++) {
             for (int k = minvox[2]; k <= maxvox[2]; k++) {
                 auto& bin(grid.at(i, j, k));
-                if (!bin.size()) continue;
                 
-                int bindistsq = ((i - binp[0]) * (i - binp[0]) + (j - binp[1]) * (j - binp[1]) + (k - binp[2]) * (k - binp[2]));
-                
-                if (bindistsq > voxeldimsq)//outside of radius
-                    continue;
+                if (!bin.size())continue;
 
-                if (bindistsq < voxeldimminsq) {//inside radius
+                if (voxeldimminsq && 
+                    (((i - binp[0]) * (i - binp[0]) + (j - binp[1]) * (j - binp[1]) + (k - binp[2]) * (k - binp[2])) <= voxeldimminsq)) 
+                {//inside radius
                     idx.insert(idx.end(), bin.begin(), bin.end());
                     continue;
                 }
-                for (auto id : bin) {
-                //    if (sorted) {//compile time branch
-                //        double dist = (V.row(id) - p).norm();
-                //        if (dist <= radius)
-                //            idx_dists[id] = dist;
-                //    }
-                //    else {
-                        if ((V.row(id) - p).norm() < radius)//Discard real distance
-                            idx.push_back(id);
-                    }
+                for (auto id : bin) {//Discard real distance
+                    if( ((P(id, 0) - p[0])* (P(id, 0) - p[0]) + (P(id, 1) - p[1])* (P(id, 1) - p[1]) + (P(id, 2) - p[2])* (P(id, 2) - p[2])) < radiussqr)
+                        idx.emplace_back(id);
+                }
                 
             }//k
         }//j
     }//i
-    if (sorted) {
-        for (auto id : idx_dists)
-            idx.push_back(id.first);
-    }
 }
 
 
@@ -523,14 +511,16 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         grid3d grid;
         {
             Eigen::MatrixX2i VgridIdx;
-            spatial_indexer_3dgrid<false>(P, 4, grid, VgridIdx);
+            spatial_indexer_3dgrid<false>(P, 5, grid, VgridIdx);
         }
         {
             const auto bruteforce_radius = [&](const Eigen::RowVector3d& pt, const double radius, vector<int> &idx) {
                 const auto m = P.rows();
+                double radiussq(radius * radius);
+                //Eigen::VectorXd dist((((P - pt.replicate(P.rows(), 1)).rowwise().squaredNorm())));// .array() > Eigen::Matrix<double, 1, 1>(radiussq).replicate(P.rows(), 1).array()).cast<int>());
                 for (int i = 0; i < m; i++) {
-                    double dist = abs((pt - P.row(i)).norm());
-                    if (dist < radius)
+                    if (((P(i, 0) - pt[0]) * (P(i, 0) - pt[0]) + (P(i, 1) - pt[1]) * (P(i, 1) - pt[1]) + (P(i, 2) - pt[2]) * (P(i, 2) - pt[2])) < radiussq)// < radius)//Discard real distance
+                    //if(dist[i]<radiussq)
                         idx.push_back(i);
                 }
             };
@@ -539,21 +529,29 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
             Eigen::RowVector3d dims(bb.row(1) - bb.row(0));
             
             constexpr int n = 100000;
+            constexpr double radius = 0.1;
             Eigen::Matrix<double, -1, 3> pts_test; pts_test.resize(n, 3);
             for (int i = 0; i < n; i++) {
                 pts_test.row(i) = Eigen::RowVector3d((double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX);
                 pts_test.row(i) = (pts_test.row(i).array() * dims.array()).matrix() + bb.row(0);
             }
             cout << "ini\n";
+            vector<int> idx_num_n_radius, idx_num_n_brute;
+            vector<int> idx;
             for (int i = 0; i < n; i++) {
-                vector<int> idx;
-                find_n_radius<false>(P, grid, Eigen::RowVector3d(pts_test.row(i)), 0.25, idx);
+                idx.clear();
+                find_n_radius(grid, Eigen::RowVector3d(pts_test.row(i)), radius, idx);
+                idx_num_n_radius.push_back(idx.size());
             }
-            cout << "bruteforce\n";
+            cout << "bruteforce\n" << endl;;
             for (int i = 0; i < n; i++) {
-                vector<int> idx;
-                bruteforce_radius(Eigen::RowVector3d(pts_test.row(i)), 0.25, idx);
+                idx.clear();
+                bruteforce_radius(Eigen::RowVector3d(pts_test.row(i)), radius, idx);
+                idx_num_n_brute.push_back(idx.size());
             }
+            
+            cout << "idx_num_n_brute[10] " << idx_num_n_brute[10] << endl << "idx_num_n_radius[100] " << idx_num_n_radius[10] << endl;
+
             cout << "end\n";
             //    //cout << "find_n_radius\tpt" << i << "\t" << pts_test.row(i) << endl << "\tn = " << idx.size() << endl << endl;
             //    idx.clear();
