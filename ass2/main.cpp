@@ -33,6 +33,7 @@ double EpsilonConstr = 0.0;
 
 // Parameter: degree of the polynomial
 int polyDegree = 0;
+int weighfunc= 0;
 
 // Parameter: Wendland weight function radius (make this relative to the size of the mesh)
 double wendlandRadius = 0.1;
@@ -149,7 +150,7 @@ void createGrid() {
     //Increased size to cover points closer to BB limits
     bb_min -= 1*(Eigen::RowVector3d(dx, dy, dz));
     bb_max += 1*(Eigen::RowVector3d(dx, dy, dz));
-    const double res(resolution + 4);
+    const double res(resolution + 2);
     resolution += 2;
     // 3D positions of the grid points -- see slides or marching_cubes.h for ordering
     grid_points.resize(res * res * res, 3);
@@ -177,17 +178,14 @@ void createGrid() {
 /*
     compile time parametrization k degree
 */
-template<int polyaprox>
+template<int polyaprox, typename weighfunclambda>
 void evaluateImplicitFunc(
     const Eigen::MatrixX3d& Pconstr,
     const Eigen::VectorXd& Vconstr,
     const grid3d &grid,
-    const double radius
+    const double radius,
+    const weighfunclambda WeightFunc
 ) {
-    const auto WeightFunc = [](const double r, const double h) -> double
-    {
-        return (4 * r / h + 1) * std::pow((1 - r / h), 4);
-    };
     /*deg0*/
     const auto evalPoint = [&](
         const Eigen::RowVector3d& p,
@@ -334,6 +332,7 @@ void evaluateImplicitFunc(
             }
         }
     };
+
     switch (polyaprox)//compile time branches
     {
     case 0:
@@ -346,6 +345,7 @@ void evaluateImplicitFunc(
         loopgrid(evalPointCuadratic);
         break;
     default:
+        loopgrid(evalPoint);
         break;
     }
 }
@@ -772,13 +772,36 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
             Eigen::MatrixX2i VgridIdx;
             spatial_indexer_3dgrid<false>(constrained_points, absres, grid, VgridIdx);
         }
+        
+        const auto WeightFuncWendland = [](const double r, const double h) -> double
+        { return (4 * r / h + 1) * std::pow((1 - r / h), 4); };
+        const auto WeightFuncGauss = [](const double r, const double h) -> double
+        { return exp(-r * r / (h * h)); };
+        const auto WeightFuncSingular = [=](const double r, const double h) -> double
+        { return (1/(r*r+EpsilonConstr/10)); };
+
+        polyDegree = polyDegree % 3;
+        weighfunc = weighfunc % 3;
+
         // Evaluate implicit function
-        if(polyDegree==0)
-            evaluateImplicitFunc<0>(constrained_points,constrained_values,grid, absres*8);
-        else if (polyDegree == 1)
-            evaluateImplicitFunc<1>(constrained_points, constrained_values, grid, absres * 8);
-        else if (polyDegree == 2)
-            evaluateImplicitFunc<2>(constrained_points, constrained_values, grid, absres * 8);
+        if (polyDegree == 0 && weighfunc == 0)
+            evaluateImplicitFunc<0>(constrained_points, constrained_values, grid, absres * 8,WeightFuncWendland);
+        else if (polyDegree == 1 && weighfunc == 0)
+            evaluateImplicitFunc<1>(constrained_points, constrained_values, grid, absres * 8, WeightFuncWendland);
+        else if (polyDegree == 2 && weighfunc == 0)
+            evaluateImplicitFunc<2>(constrained_points, constrained_values, grid, absres * 8, WeightFuncWendland);
+        else if (polyDegree == 0 && weighfunc == 1)
+            evaluateImplicitFunc<0>(constrained_points, constrained_values, grid, absres * 8, WeightFuncGauss);
+        else if (polyDegree == 1 && weighfunc == 1)
+            evaluateImplicitFunc<1>(constrained_points, constrained_values, grid, absres * 8, WeightFuncGauss);
+        else if (polyDegree == 2 && weighfunc == 1)
+            evaluateImplicitFunc<2>(constrained_points, constrained_values, grid, absres * 8, WeightFuncGauss);
+        else if (polyDegree == 0 && weighfunc == 2)
+            evaluateImplicitFunc<0>(constrained_points, constrained_values, grid, absres * 8, WeightFuncSingular);
+        else if (polyDegree == 1 && weighfunc == 2)
+            evaluateImplicitFunc<1>(constrained_points, constrained_values, grid, absres * 8, WeightFuncSingular);
+        else if (polyDegree == 2 && weighfunc == 2)
+            evaluateImplicitFunc<2>(constrained_points, constrained_values, grid, absres * 8, WeightFuncSingular);
 
         // get grid lines
         getLines();
@@ -867,7 +890,8 @@ int main(int argc, char *argv[]) {
       {
         // Expose variable directly ...
           ImGui::InputInt("Resolution", &resolution, 0, 0);
-          ImGui::InputInt("Resolution", &polyDegree, 0, 0);
+          ImGui::InputInt("Polydegree", &polyDegree, 0, 0);
+          ImGui::InputInt("WeighFunc", &weighfunc, 0, 0);
         if (ImGui::Button("Reset Grid", ImVec2(-1,0)))
         {
           std::cout << "ResetGrid\n";
