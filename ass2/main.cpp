@@ -77,6 +77,7 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers);
 struct grid3d {
 public:
     vector<vector<int>> grid;
+    vector<int> binSizes;
     double res;
     Eigen::RowVector3d min;//bb
     Eigen::RowVector3d max;//bb
@@ -90,9 +91,12 @@ public:
     inline int atidx(int x, int y, int z) const {
         return x + y * bin[0] + z * bin[0] * bin[1];
     };
-    const vector<int>& at(int i, int j, int k) const {
+    inline const vector<int>& at(int i, int j, int k) const {
         return grid[atidx(i, j, k)];
     };
+    inline const int sizeAt(int i, int j, int k) const {
+        return binSizes[atidx(i, j, k)]; 
+    }
     inline Eigen::RowVector3i binpoint(const Eigen::RowVector3d& p) const {
         return Eigen::RowVector3i(((p - min) / res).cast<int>());
     }
@@ -166,6 +170,36 @@ void createGrid() {
         }
     }
 }
+
+void VisGrid3D(Viewer& viewer) 
+{
+    // get grid lines
+    getLines();
+
+    // Code for coloring and displaying the grid points and lines
+    // Assumes that grid_values and grid_points have been correctly assigned.
+    grid_colors.setZero(grid_points.rows(), 3);
+
+    // Build color map
+    for (int i = 0; i < grid_points.rows(); ++i) {
+        double value = grid_values(i);
+        if (value < 0) {
+            grid_colors(i, 1) = 1;
+        }
+        else {
+            if (value > 0)
+                grid_colors(i, 0) = 1;
+        }
+    }
+
+    // Draw lines and points
+    viewer.data().point_size = 8;
+    viewer.data().add_points(grid_points, grid_colors);
+    viewer.data().add_edges(grid_lines.block(0, 0, grid_lines.rows(), 3),
+        grid_lines.block(0, 3, grid_lines.rows(), 3),
+        Eigen::RowVector3d(0.8, 0.8, 0.8));
+    /*** end: sphere example ***/
+};
 
 // Function for explicitly evaluating the implicit function for a sphere of
 // radius r centered at c : f(p) = ||p-c|| - r, where p = (x,y,z).
@@ -326,7 +360,7 @@ void evaluateImplicitFunc(
                 // Linear index of the point at (x,y,z)
                 //MLS eval
                 if (!find_n_radius(Pconstr, grid, grid_points.row(index), radius, idx))
-                    grid_values[index] = numeric_limits<double>::max();
+                    grid_values[index] = std::nan(""); // numeric_limits<double>::max();
                 else
                     grid_values[index] = /*evalPoint*/evalpt_lambda(grid_points.row(index), idx);
             }
@@ -510,9 +544,11 @@ bool find_n_radius(
     for (int i = minvox[0]; i <= maxvox[0]; i++) {
         for (int j = minvox[1]; j <= maxvox[1]; j++) {
             for (int k = minvox[2]; k <= maxvox[2]; k++) {
-                auto& bin(grid.at(i, j, k));
                 
-                if (!bin.size())continue;
+                if (!grid.sizeAt(i,j,k))
+                    continue;
+                
+                auto& bin(grid.at(i, j, k));
 
                 if (voxeldimminsq && 
                     (((i - binp[0]) * (i - binp[0]) + (j - binp[1]) * (j - binp[1]) + (k - binp[2]) * (k - binp[2])) <= voxeldimminsq)) 
@@ -571,6 +607,9 @@ void spatial_indexer_3dgrid(
             VgridIdx(i, 1) = grid.grid[idx].size() - 1;
         }
     }
+    grid.binSizes.resize(grid.grid.size());
+    for (int i = 0; i < grid.grid.size(); ++i)
+        grid.binSizes[i] = grid.grid[i].size();
 #ifdef DEBUG
     cout << "print grid\n";
     for (int z = 0; z < nz; z++) {
@@ -621,9 +660,9 @@ void add_constraints(
 
     double mindist = numeric_limits<double>::max();
     bool keepgoing = true;
-    double average_points_per_bin = 5;
+    volatile double average_points_per_bin = 5;
     grid3d grid;
-    int factor_subdivision_grid = 2;
+    volatile int factor_subdivision_grid = 2;
     while(true)
     {
         grid = grid3d();
@@ -803,35 +842,14 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         else if (polyDegree == 2 && weighfunc == 2)
             evaluateImplicitFunc<2>(constrained_points, constrained_values, grid, absres * 8, WeightFuncSingular);
 
-        // get grid lines
-        getLines();
-
-        // Code for coloring and displaying the grid points and lines
-        // Assumes that grid_values and grid_points have been correctly assigned.
-        grid_colors.setZero(grid_points.rows(), 3);
-
-        // Build color map
-        for (int i = 0; i < grid_points.rows(); ++i) {
-            double value = grid_values(i);
-            if (value < 0) {
-                grid_colors(i, 1) = 1;
-            }
-            else {
-                if (value > 0)
-                    grid_colors(i, 0) = 1;
-            }
-        }
-
-        // Draw lines and points
-        viewer.data().point_size = 8;
-        viewer.data().add_points(grid_points, grid_colors);
-        viewer.data().add_edges(grid_lines.block(0, 0, grid_lines.rows(), 3),
-                              grid_lines.block(0, 3, grid_lines.rows(), 3),
-                              Eigen::RowVector3d(0.8, 0.8, 0.8));
-        /*** end: sphere example ***/
+        VisGrid3D(viewer);
     }
-
     if (key == '4') {
+        //Pruning grid 3d
+
+        VisGrid3D(viewer);
+    }
+    if (key == '5') {
         // Show reconstructed mesh
         viewer.data().clear();
         // Code for computing the mesh (V,F) from grid_points and grid_values
