@@ -360,7 +360,7 @@ void evaluateImplicitFunc(
                 // Linear index of the point at (x,y,z)
                 //MLS eval
                 if (!find_n_radius(Pconstr, grid, grid_points.row(index), radius, idx))
-                    grid_values[index] = std::nan(""); // numeric_limits<double>::max();
+                    grid_values[index] = std::nan(""); //flag void points
                 else
                     grid_values[index] = /*evalPoint*/evalpt_lambda(grid_points.row(index), idx);
             }
@@ -545,7 +545,7 @@ bool find_n_radius(
         for (int j = minvox[1]; j <= maxvox[1]; j++) {
             for (int k = minvox[2]; k <= maxvox[2]; k++) {
                 
-                if (!grid.sizeAt(i,j,k))
+                if (!grid.sizeAt(i,j,k))//micro-op
                     continue;
                 
                 auto& bin(grid.at(i, j, k));
@@ -752,7 +752,7 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         //////constexpr int n = 100000;
         auto aabb(AABB(P));
         const Eigen::RowVector3d sz(aabb.row(1) - aabb.row(0));
-        double absres = sz.minCoeff()/resolution;
+        double absres = sz.minCoeff() / resolution;
         //////grid3d grid;
         //////{
         //////    Eigen::MatrixX2i VgridIdx;
@@ -811,20 +811,20 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
             Eigen::MatrixX2i VgridIdx;
             spatial_indexer_3dgrid<false>(constrained_points, absres, grid, VgridIdx);
         }
-        
+
         const auto WeightFuncWendland = [](const double r, const double h) -> double
         { return (4 * r / h + 1) * std::pow((1 - r / h), 4); };
         const auto WeightFuncGauss = [](const double r, const double h) -> double
         { return exp(-r * r / (h * h)); };
         const auto WeightFuncSingular = [=](const double r, const double h) -> double
-        { return (1/(r*r+EpsilonConstr/10)); };
+        { return (1 / (r * r + EpsilonConstr / 10)); };
 
         polyDegree = polyDegree % 3;
         weighfunc = weighfunc % 3;
 
         // Evaluate implicit function
         if (polyDegree == 0 && weighfunc == 0)
-            evaluateImplicitFunc<0>(constrained_points, constrained_values, grid, absres * 8,WeightFuncWendland);
+            evaluateImplicitFunc<0>(constrained_points, constrained_values, grid, absres * 8, WeightFuncWendland);
         else if (polyDegree == 1 && weighfunc == 0)
             evaluateImplicitFunc<1>(constrained_points, constrained_values, grid, absres * 8, WeightFuncWendland);
         else if (polyDegree == 2 && weighfunc == 0)
@@ -845,11 +845,6 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         VisGrid3D(viewer);
     }
     if (key == '4') {
-        //Pruning grid 3d
-
-        VisGrid3D(viewer);
-    }
-    if (key == '5') {
         // Show reconstructed mesh
         viewer.data().clear();
         // Code for computing the mesh (V,F) from grid_points and grid_values
