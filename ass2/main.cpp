@@ -317,18 +317,18 @@ void evaluateImplicitFunc(
     // Evaluate sphere's signed distance function at each gridpoint.
     const auto loopgrid = [&](const auto evalpt_lambda)
     {
-        vector<int> idx;
-        for (unsigned int x = 0; x < resolution; ++x) {
-            for (unsigned int y = 0; y < resolution; ++y) {
-                for (unsigned int z = 0; z < resolution; ++z) {
-                    // Linear index of the point at (x,y,z)
-                    int index = x + resolution * (y + resolution * z);
-                    //MLS eval
-                    if (!find_n_radius(Pconstr, grid, grid_points.row(index), radius, idx))
-                        grid_values[index] = numeric_limits<double>::max();
-                    else
-                        grid_values[index] = /*evalPoint*/evalpt_lambda(grid_points.row(index),idx);
-                }
+        const int idxMax = pow(resolution, 3);
+#pragma omp parallel
+        {
+            vector<int> idx;
+#pragma omp parallel for if(idxMax>1000)
+            for (int index = 0; index < idxMax; index++) {
+                // Linear index of the point at (x,y,z)
+                //MLS eval
+                if (!find_n_radius(Pconstr, grid, grid_points.row(index), radius, idx))
+                    grid_values[index] = numeric_limits<double>::max();
+                else
+                    grid_values[index] = /*evalPoint*/evalpt_lambda(grid_points.row(index), idx);
             }
         }
     };
