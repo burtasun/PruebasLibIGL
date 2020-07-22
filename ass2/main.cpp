@@ -11,10 +11,15 @@
 
 #include <igl/jet.h>
 
+#include <Eigen/Eigenvalues> 
+
 using namespace std;
 using Viewer = igl::opengl::glfw::Viewer;
+#ifdef DEBUG
+#define dbg(var) cout<<endl<<#var<<"--------\n"<<var<<endl;
+#else
 #define dbg(var) ;
-#define dbg1(var) cout<<endl<<#var<<"--------\n"<<var<<endl;
+#endif
 
 // Input: imported points, #P x3
 Eigen::MatrixXd P;
@@ -200,6 +205,54 @@ void VisGrid3D(Viewer& viewer)
         Eigen::RowVector3d(0.8, 0.8, 0.8));
     /*** end: sphere example ***/
 };
+
+
+void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
+    //cube mesh
+    /*
+    |z -x /y
+       7 --- 8
+      /     /|
+    4 --- 3  |
+    |  5  |  6
+    | /   | /
+    1 --- 2
+
+    1m / 8M
+
+    */
+    Eigen::RowVector3d m(bb.row(0));
+    Eigen::RowVector3d M(bb.row(1));
+    Eigen::MatrixX3d v(8, 3);
+    v.row(0) = m;
+    v.row(1) = Eigen::RowVector3d(M[0], m[1], m[2]);
+    v.row(2) = Eigen::RowVector3d(M[0], m[1], M[2]);
+    v.row(3) = Eigen::RowVector3d(m[0], m[1], M[2]);
+    v.row(4) = Eigen::RowVector3d(m[0], M[1], m[2]);
+    v.row(5) = Eigen::RowVector3d(M[0], M[1], m[2]);
+    v.row(6) = Eigen::RowVector3d(m[0], M[1], M[2]);
+    v.row(7) = Eigen::RowVector3d(M[0], M[1], M[2]);
+    Eigen::MatrixXd bblines(12, 6);//line row / each row start/end point
+    bblines.block<1, 3>(0, 0) = v.row(0); bblines.block<1, 3>(0, 3) = v.row(1);
+    bblines.block<1, 3>(1, 0) = v.row(0); bblines.block<1, 3>(1, 3) = v.row(3);
+    bblines.block<1, 3>(2, 0) = v.row(0); bblines.block<1, 3>(2, 3) = v.row(4);
+    bblines.block<1, 3>(3, 0) = v.row(1); bblines.block<1, 3>(3, 3) = v.row(2);
+    bblines.block<1, 3>(4, 0) = v.row(1); bblines.block<1, 3>(4, 3) = v.row(5);
+    bblines.block<1, 3>(5, 0) = v.row(5); bblines.block<1, 3>(5, 3) = v.row(4);
+    bblines.block<1, 3>(6, 0) = v.row(5); bblines.block<1, 3>(6, 3) = v.row(7);
+    bblines.block<1, 3>(7, 0) = v.row(4); bblines.block<1, 3>(7, 3) = v.row(6);
+    bblines.block<1, 3>(8, 0) = v.row(6); bblines.block<1, 3>(8, 3) = v.row(3);
+    bblines.block<1, 3>(9, 0) = v.row(6); bblines.block<1, 3>(9, 3) = v.row(7);
+    bblines.block<1, 3>(10, 0) = v.row(2); bblines.block<1, 3>(10, 3) = v.row(3);
+    bblines.block<1, 3>(11, 0) = v.row(2); bblines.block<1, 3>(11, 3) = v.row(7);
+
+    viewer.data().add_edges(
+        bblines.block(0, 0, bblines.rows(), 3),
+        bblines.block(0, 3, bblines.rows(), 3),
+        Eigen::RowVector3d(0.8, 0.8, 0.8)//color
+    );
+}
+
 
 // Function for explicitly evaluating the implicit function for a sphere of
 // radius r centered at c : f(p) = ||p-c|| - r, where p = (x,y,z).
@@ -425,6 +478,33 @@ Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
     return BB;
 }
 
+//Object Oriented Bounding Box
+//[minxyz;maxxyz]
+Eigen::Matrix<double, 2, 3> OOBB(const Eigen::MatrixX3d& V, const Eigen::MatrixX3d& N, Eigen::MatrixX3d& Vrot, Eigen::MatrixX3d& Nrot) {
+    Eigen::RowVector3d centroid = V.colwise().sum() / V.rows();
+    Eigen::MatrixX3d Vmean = V - centroid.replicate(V.rows(), 1);//xi-ux,yi-uy,zi-uz
+    Eigen::Matrix3d Covariance;
+    Covariance <<
+        (Vmean.col(0).array()* Vmean.col(0).array()).sum(), (Vmean.col(0).array()* Vmean.col(1).array()).sum(), (Vmean.col(0).array()* Vmean.col(2).array()).sum(),
+        (Vmean.col(1).array()* Vmean.col(0).array()).sum(), (Vmean.col(1).array()* Vmean.col(1).array()).sum(), (Vmean.col(1).array()* Vmean.col(2).array()).sum(),
+        (Vmean.col(2).array()* Vmean.col(0).array()).sum(), (Vmean.col(2).array()* Vmean.col(1).array()).sum(), (Vmean.col(2).array()* Vmean.col(2).array()).sum();
+
+    Eigen::EigenSolver<Eigen::Matrix3d> es;
+    es.compute(Covariance, true);
+    Eigen::Matrix3d EigVecs = es.pseudoEigenvectors();//'pseudo', only real part
+    Eigen::Vector3d lambdas = es.pseudoEigenvalueMatrix().diagonal();
+    dbg(EigVecs) dbg(lambdas);
+    EigVecs.colwise().normalize();
+    dbg(EigVecs);//Rotation matrix
+
+    Eigen::Matrix4d T_orig_oobb(Eigen::Matrix4d::Identity());
+    T_orig_oobb.topLeftCorner<3, 3>()=EigVecs;
+    T_orig_oobb.topRightCorner<3, 1>() = centroid.transpose();
+    Eigen::Matrix4d T_oobb_orig = T_orig_oobb.inverse();
+    Vrot = (T_oobb_orig.topLeftCorner<3, 3>() * V.transpose() + T_oobb_orig.topRightCorner<3, 1>().replicate(1, V.rows())).transpose();
+    Nrot = (EigVecs.transpose() * N.transpose()).transpose();//free vector, only rotation
+    return AABB(Vrot);
+}
 
 
 
@@ -721,8 +801,18 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         viewer.data().point_size = 11;
         viewer.data().add_points(P, Eigen::RowVector3d(0,0,0));
     }
-
     if (key == '2') {
+        // Visualize current bounding box
+        Eigen::MatrixX3d Prot, Nrot;
+        Eigen::Matrix4d T_oobb_orig;
+        auto bb = OOBB(P, N, Prot, Nrot);
+        P = Prot;
+        N = Nrot;
+        callback_key_down(viewer, '1', modifiers);//update to new rotated points
+        DrawBB(viewer, bb);
+    }
+
+    if (key == '3') {
         // Add your code for computing auxiliary constraint points here
         Eigen::MatrixX3d Pconstr;
         N.rowwise().normalize();
@@ -741,7 +831,7 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         viewer.data().add_points(Pconstr, C_rgb);
     }
 
-    if (key == '3') {
+    if (key == '4') {
         // Show grid points with colored nodes and connected with lines
         viewer.data().clear();
         viewer.core.align_camera_center(P);
@@ -844,7 +934,7 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
 
         VisGrid3D(viewer);
     }
-    if (key == '4') {
+    if (key == '5') {
         // Show reconstructed mesh
         viewer.data().clear();
         // Code for computing the mesh (V,F) from grid_points and grid_values
