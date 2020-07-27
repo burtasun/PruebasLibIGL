@@ -14,6 +14,20 @@
 #include <Eigen/Eigenvalues> 
 
 using namespace std;
+using namespace Eigen;
+
+using T = float;
+
+using M44 = Eigen::Matrix<T,4,4>;
+using M33 = Eigen::Matrix<T,3,3>;
+using Mx3 = Eigen::Matrix<T,-1,3>;
+//using Mxx = Eigen::Matrix<T,-1,-1>;
+using V3 = Eigen::Matrix<T, 1, 3>;//default rows as vectors
+using V3col = Eigen::Matrix<T, 3, 1>;
+using V3i = Eigen::Matrix<int, 1, 3>;
+using Mx = Eigen::Matrix<T, -1, -1>;
+using Vxcol = Eigen::Matrix<T, -1, 1>;
+
 using Viewer = igl::opengl::glfw::Viewer;
 #ifdef DEBUG
 #define dbg(var) cout<<endl<<#var<<"--------\n"<<var<<endl;
@@ -22,51 +36,51 @@ using Viewer = igl::opengl::glfw::Viewer;
 #endif
 
 // Input: imported points, #P x3
-Eigen::MatrixXd P;
+Mx P;
 
 // Input: imported normals, #P x3
-Eigen::MatrixXd N;
+Mx N;
 
 // Intermediate result: constrained points, #C x3
-Eigen::MatrixXd constrained_points;
+Mx constrained_points;
 
 // Intermediate result: implicit function values at constrained points, #C x1
-Eigen::VectorXd constrained_values;
+Vxcol constrained_values;
 
 //Epsilon val
-double EpsilonConstr = 0.0;
+T EpsilonConstr = 0.0;
 
 // Parameter: degree of the polynomial
 int polyDegree = 0;
 int weighfunc= 0;
 
 // Parameter: Wendland weight function radius (make this relative to the size of the mesh)
-double wendlandRadius = 0.1;
+T wendlandRadius = 0.1;
 
 // Parameter: grid resolution
 int resolution = 20;
 
 // Intermediate result: grid points, at which the imlicit function will be evaluated, #G x3
-Eigen::MatrixXd grid_points;
+Mx grid_points;
 
 // Intermediate result: implicit function values at the grid points, #G x1
-Eigen::VectorXd grid_values;
+Vxcol grid_values;
 
 // Intermediate result: grid point colors, for display, #G x3
-Eigen::MatrixXd grid_colors;
+Mx grid_colors;
 
 // Intermediate result: grid lines, for display, #L x6 (each row contains
 // starting and ending point of line segment)
-Eigen::MatrixXd grid_lines;
+Mx grid_lines;
 
 // Output: vertex array, #V x3
-Eigen::MatrixXd V;
+Mx V;
 
 // Output: face array, #F x3
 Eigen::MatrixXi F;
 
 // Output: face normals of the reconstructed mesh, #F x3
-Eigen::MatrixXd FN;
+Mx FN;
 
 // Functions
 void createGrid();
@@ -83,11 +97,11 @@ struct grid3d {
 public:
     vector<vector<int>> grid;
     vector<int> binSizes;
-    double res;
-    Eigen::RowVector3d min;//bb
-    Eigen::RowVector3d max;//bb
-    Eigen::RowVector3i bin;//nx ny nz
-    inline bool inside(const Eigen::RowVector3d& p)const {
+    T res;
+    V3 min;//bb
+    V3 max;//bb
+    V3i bin;//nx ny nz
+    inline bool inside(const V3& p)const {
         bool inside = true;
         for (int i = 0; i < 3; i++)
             inside &= (p[i] > min[i])& (p[i] < max[i]);
@@ -102,10 +116,10 @@ public:
     inline const int sizeAt(int i, int j, int k) const {
         return binSizes[atidx(i, j, k)]; 
     }
-    inline Eigen::RowVector3i binpoint(const Eigen::RowVector3d& p) const {
-        return Eigen::RowVector3i(((p - min) / res).cast<int>());
+    inline V3i binpoint(const V3& p) const {
+        return V3i(((p - min) / res).cast<int>());
     }
-    bool at(const Eigen::RowVector3d& p, vector<int>& binp) const {
+    bool at(const V3& p, vector<int>& binp) const {
         if (!inside(p))
             return false;
         auto pcomp = binpoint(p);
@@ -114,7 +128,7 @@ public:
         return true;
     };
     //Assumes p inside grid
-    void truncated_voxel(const Eigen::RowVector3d& p, const int voxel_dim, Eigen::RowVector3i& minvox, Eigen::RowVector3i& maxvox) const {
+    void truncated_voxel(const V3& p, const int voxel_dim, V3i& minvox, V3i& maxvox) const {
         auto binp = binpoint(p);
         for (int i = 0; i < 3; i++) {
             minvox[i] = ((binp[i] - voxel_dim) > 0) ? (binp[i] - voxel_dim) : 0;
@@ -124,10 +138,10 @@ public:
 };
 
 bool find_n_radius(
-    const Eigen::MatrixX3d& pts,
+    const Mx3& pts,
     const grid3d& grid,
-    const Eigen::RowVector3d& p,
-    const double radius,
+    const V3& p,
+    const T radius,
     vector<int>& idx 
 );
 
@@ -145,21 +159,21 @@ void createGrid() {
     FN.resize(0, 3);
 
     // Grid bounds: axis-aligned bounding box
-    Eigen::RowVector3d bb_min, bb_max;
+    V3 bb_min, bb_max;
     bb_min = P.colwise().minCoeff();
     bb_max = P.colwise().maxCoeff();
 
     // Bounding box dimensions
-    Eigen::RowVector3d dim = bb_max - bb_min;
+    V3 dim = bb_max - bb_min;
 
     // Grid spacing
-    const double dx = dim[0] / (double)(resolution - 1);
-    const double dy = dim[1] / (double)(resolution - 1);
-    const double dz = dim[2] / (double)(resolution - 1);
+    const T dx = dim[0] / (double)(resolution - 1);
+    const T dy = dim[1] / (double)(resolution - 1);
+    const T dz = dim[2] / (double)(resolution - 1);
     //Increased size to cover points closer to BB limits
-    bb_min -= 1*(Eigen::RowVector3d(dx, dy, dz));
-    bb_max += 1*(Eigen::RowVector3d(dx, dy, dz));
-    const double res(resolution + 2);
+    bb_min -= 1*(V3(dx, dy, dz));
+    bb_max += 1*(V3(dx, dy, dz));
+    const T res(resolution + 2);
     resolution += 2;
     // 3D positions of the grid points -- see slides or marching_cubes.h for ordering
     grid_points.resize(res * res * res, 3);
@@ -170,7 +184,7 @@ void createGrid() {
                 // Linear index of the point at (x,y,z)
                 int index = x + res * (y + res * z);
                 // 3D point at (x,y,z)
-                grid_points.row(index) = bb_min + Eigen::RowVector3d(x * dx, y * dy, z * dz);
+                grid_points.row(index) = bb_min + V3(x * dx, y * dy, z * dz);
             }
         }
     }
@@ -187,7 +201,7 @@ void VisGrid3D(Viewer& viewer)
 
     // Build color map
     for (int i = 0; i < grid_points.rows(); ++i) {
-        double value = grid_values(i);
+        T value = grid_values(i);
         if (value < 0) {
             grid_colors(i, 1) = 1;
         }
@@ -199,15 +213,16 @@ void VisGrid3D(Viewer& viewer)
 
     // Draw lines and points
     viewer.data().point_size = 8;
-    viewer.data().add_points(grid_points, grid_colors);
-    viewer.data().add_edges(grid_lines.block(0, 0, grid_lines.rows(), 3),
-        grid_lines.block(0, 3, grid_lines.rows(), 3),
-        Eigen::RowVector3d(0.8, 0.8, 0.8));
+    viewer.data().add_points(grid_points.cast<double>(), grid_colors.cast<double>());
+    viewer.data().add_edges(
+        grid_lines.block(0, 0, grid_lines.rows(), 3).cast<double>(),
+        grid_lines.block(0, 3, grid_lines.rows(), 3).cast<double>(),
+        V3(0.8, 0.8, 0.8).cast<double>());
     /*** end: sphere example ***/
 };
 
 
-void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
+void DrawBB(Viewer& viewer, Eigen::Matrix<T, 2, 3>& bb) {
     //cube mesh
     /*
     |z -x /y
@@ -221,18 +236,18 @@ void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
     1m / 8M
 
     */
-    Eigen::RowVector3d m(bb.row(0));
-    Eigen::RowVector3d M(bb.row(1));
-    Eigen::MatrixX3d v(8, 3);
+    V3 m(bb.row(0));
+    V3 M(bb.row(1));
+    Mx3 v(8, 3);
     v.row(0) = m;
-    v.row(1) = Eigen::RowVector3d(M[0], m[1], m[2]);
-    v.row(2) = Eigen::RowVector3d(M[0], m[1], M[2]);
-    v.row(3) = Eigen::RowVector3d(m[0], m[1], M[2]);
-    v.row(4) = Eigen::RowVector3d(m[0], M[1], m[2]);
-    v.row(5) = Eigen::RowVector3d(M[0], M[1], m[2]);
-    v.row(6) = Eigen::RowVector3d(m[0], M[1], M[2]);
-    v.row(7) = Eigen::RowVector3d(M[0], M[1], M[2]);
-    Eigen::MatrixXd bblines(12, 6);//line row / each row start/end point
+    v.row(1) = V3(M[0], m[1], m[2]);
+    v.row(2) = V3(M[0], m[1], M[2]);
+    v.row(3) = V3(m[0], m[1], M[2]);
+    v.row(4) = V3(m[0], M[1], m[2]);
+    v.row(5) = V3(M[0], M[1], m[2]);
+    v.row(6) = V3(m[0], M[1], M[2]);
+    v.row(7) = V3(M[0], M[1], M[2]);
+    Mx bblines(12, 6);//line row / each row start/end point
     bblines.block<1, 3>(0, 0) = v.row(0); bblines.block<1, 3>(0, 3) = v.row(1);
     bblines.block<1, 3>(1, 0) = v.row(0); bblines.block<1, 3>(1, 3) = v.row(3);
     bblines.block<1, 3>(2, 0) = v.row(0); bblines.block<1, 3>(2, 3) = v.row(4);
@@ -247,9 +262,9 @@ void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
     bblines.block<1, 3>(11, 0) = v.row(2); bblines.block<1, 3>(11, 3) = v.row(7);
 
     viewer.data().add_edges(
-        bblines.block(0, 0, bblines.rows(), 3),
-        bblines.block(0, 3, bblines.rows(), 3),
-        Eigen::RowVector3d(0.8, 0.8, 0.8)//color
+        bblines.block(0, 0, bblines.rows(), 3).cast<double>(),
+        bblines.block(0, 3, bblines.rows(), 3).cast<double>(),
+        V3(0.8, 0.8, 0.8).cast<double>()//color
     );
 }
 
@@ -267,27 +282,27 @@ void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
 */
 template<int polyaprox, typename weighfunclambda>
 void evaluateImplicitFunc(
-    const Eigen::MatrixX3d& Pconstr,
-    const Eigen::VectorXd& Vconstr,
+    const Mx3& Pconstr,
+    const Vxcol& Vconstr,
     const grid3d &grid,
-    const double radius,
+    const T radius,
     const weighfunclambda WeightFunc
 ) {
     /*deg0*/
     const auto evalPoint = [&](
-        const Eigen::RowVector3d& p,
+        const V3& p,
         const vector<int>& idx
-        ) -> double
+        ) -> T
     {
 
         //centers -> ci & weights -> w(||p-ci||)
         /*A = [ci 1]*/
-        Eigen::Matrix<double, -1, 1/*value->1*/> A;
+        Eigen::Matrix<T, -1, 1/*value->1*/> A;
         A.setOnes(idx.size());
         /*w*/
-        Eigen::VectorXd W; W.resize(idx.size());
+        Vxcol W; W.resize(idx.size());
         /*d*/
-        Eigen::VectorXd B; B.resize(idx.size());
+        Vxcol B; B.resize(idx.size());
 
         for (int i = 0; i < idx.size(); i++) {
             B[i] = Vconstr[idx[i]];
@@ -301,27 +316,27 @@ void evaluateImplicitFunc(
         dbg(A); dbg(B);
 
         //a1 - a4
-        Eigen::Matrix<double, 1, 1> sol = A.householderQr().solve(B);
+        Eigen::Matrix<T, 1, 1> sol = A.householderQr().solve(B);
         //pxa1+...pza3+a4
-        double ret = sol[0];// p.dot(sol.head(3)) + sol[3];
+        T ret = sol[0];// p.dot(sol.head(3)) + sol[3];
         dbg(sol); dbg(ret);
         return ret;
     };
     /*deg1*/
     const auto evalPointPlane = [&](
-        const Eigen::RowVector3d& p,
+        const V3& p,
         const vector<int> &idx
-        ) -> double
+        ) -> T
     {
         //centers -> ci & weights -> w(||p-ci||)
         if (idx.size() < 20)
             return evalPoint(p, idx);
         /*A = [ci 1]*/
-        Eigen::Matrix<double, -1, 4/*plane->4*/> A; A.resize(idx.size(), Eigen::NoChange);
+        Eigen::Matrix<T, -1, 4/*plane->4*/> A; A.resize(idx.size(), Eigen::NoChange);
         /*w*/
-        Eigen::VectorXd W; W.resize(idx.size());
+        Vxcol W; W.resize(idx.size());
         /*d*/
-        Eigen::VectorXd B; B.resize(idx.size());
+        Vxcol B; B.resize(idx.size());
         
         for (int i = 0; i < idx.size(); i++) {
             B[i] = Vconstr[idx[i]];
@@ -337,9 +352,9 @@ void evaluateImplicitFunc(
         dbg(A); dbg(B);
 
         //a1 - a4
-        Eigen::Matrix<double,4,1> sol = A.colPivHouseholderQr().solve(B);
+        Eigen::Matrix<T,4,1> sol = A.colPivHouseholderQr().solve(B);
         //pxa1+...pza3+a4
-        double ret = p.dot(sol.head(3)) + sol[3];
+        T ret = p.dot(sol.head(3)) + sol[3];
         //if (abs(ret) < 1) {
         //    dbg1(sol); dbg1(ret);
         //    dbg1(radius); dbg1(p); dbg1(B); dbg1(A); dbg1(W);
@@ -348,26 +363,26 @@ void evaluateImplicitFunc(
     };
     /*deg2*/
     const auto evalPointCuadratic = [&](
-        const Eigen::RowVector3d& p,
+        const V3& p,
         const vector<int>& idx
-        ) -> double
+        ) -> T
     {
 
         //centers -> ci & weights -> w(||p-ci||)
         if (idx.size() < 20)
             return evalPoint(p, idx);
         /*A = [ci 1]*/
-        Eigen::Matrix<double, -1, 10/*value->1*/> A;
+        Eigen::Matrix<T, -1, 10/*value->1*/> A;
         A.resize(idx.size(), Eigen::NoChange);
         A.block(0, 0, A.rows(), 1).setConstant(1);
         /*w*/
-        Eigen::VectorXd W; W.resize(idx.size());
+        Vxcol W; W.resize(idx.size());
         /*d*/
-        Eigen::VectorXd B; B.resize(idx.size());
+        Vxcol B; B.resize(idx.size());
 
         for (int i = 0; i < idx.size(); i++) {
             auto& pt(Pconstr.row(idx[i]));
-            double tmp[] = { 1, pt[0], pt[1], pt[2], /*1 x y z*/
+            T tmp[] = { 1, pt[0], pt[1], pt[2], /*1 x y z*/
                 pt[0] * pt[1], pt[0] * pt[2], pt[1] * pt[2], /*xy xz yz*/
                 pt[0] * pt[0], pt[1] * pt[1], pt[2] * pt[2] }; /*x2 y2 z2*/
             for (int j = 0; j < 10; j++)
@@ -383,12 +398,12 @@ void evaluateImplicitFunc(
         dbg(A); dbg(B);
 
         //a1 - a4
-        Eigen::Matrix<double, 10, 1> sol = A.colPivHouseholderQr().solve(B);
+        Eigen::Matrix<T, 10, 1> sol = A.colPivHouseholderQr().solve(B);
         //pxa1+...pza3+a4
-        double ret = 0.0;
+        T ret = 0.0;
         {
             auto& pt(p);
-            double tmp[] = { 1, pt[0], pt[1], pt[2], /*1 x y z*/
+            T tmp[] = { 1, pt[0], pt[1], pt[2], /*1 x y z*/
                 pt[0] * pt[1], pt[0] * pt[2], pt[1] * pt[2], /*xy xz yz*/
                 pt[0] * pt[0], pt[1] * pt[1], pt[2] * pt[2] };/*x2 y2 z2*/
             for (int i = 0; i < 10; i++)
@@ -407,6 +422,8 @@ void evaluateImplicitFunc(
         const int idxMax = pow(resolution, 3);
 #pragma omp parallel
         {
+            Eigen::HouseholderQR<Matrix<T, -1, 1>> solver(100,1);
+            Vxcol A(100, 1), B(100, 1), W(100, 1);
             vector<int> idx;
 #pragma omp parallel for if(idxMax>1000)
             for (int index = 0; index < idxMax; index++) {
@@ -424,13 +441,13 @@ void evaluateImplicitFunc(
     {
     case 0:
         loopgrid(evalPoint);
-        break;
+        break;/*
     case 1:
         loopgrid(evalPointPlane);
         break;
     case 2:
         loopgrid(evalPointCuadratic);
-        break;
+        break;*/
     default:
         loopgrid(evalPoint);
         break;
@@ -469,8 +486,8 @@ void getLines() {
 }
 
 //[minxyz;maxxyz]
-Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
-    Eigen::Matrix<double, 2, 3> BB;
+Eigen::Matrix<T,2,3> AABB(const Mx3& V) {
+    Eigen::Matrix<T, 2, 3> BB;
     for (int i = 0; i < 3; i++) {
         BB(0, i) = V.block(0, i, V.rows(), 1).minCoeff();
         BB(1, i) = V.block(0, i, V.rows(), 1).maxCoeff();
@@ -480,27 +497,27 @@ Eigen::Matrix<double,2,3> AABB(const Eigen::MatrixX3d& V) {
 
 //Object Oriented Bounding Box
 //[minxyz;maxxyz]
-Eigen::Matrix<double, 2, 3> OOBB(const Eigen::MatrixX3d& V, const Eigen::MatrixX3d& N, Eigen::MatrixX3d& Vrot, Eigen::MatrixX3d& Nrot) {
-    Eigen::RowVector3d centroid = V.colwise().sum() / V.rows();
-    Eigen::MatrixX3d Vmean = V - centroid.replicate(V.rows(), 1);//xi-ux,yi-uy,zi-uz
-    Eigen::Matrix3d Covariance;
+Eigen::Matrix<T, 2, 3> OOBB(const Mx3& V, const Mx3& N, Mx3& Vrot, Mx3& Nrot) {
+    V3 centroid = V.colwise().sum() / V.rows();
+    Mx3 Vmean = V - centroid.replicate(V.rows(), 1);//xi-ux,yi-uy,zi-uz
+    M33 Covariance;
     Covariance <<
         (Vmean.col(0).array()* Vmean.col(0).array()).sum(), (Vmean.col(0).array()* Vmean.col(1).array()).sum(), (Vmean.col(0).array()* Vmean.col(2).array()).sum(),
         (Vmean.col(1).array()* Vmean.col(0).array()).sum(), (Vmean.col(1).array()* Vmean.col(1).array()).sum(), (Vmean.col(1).array()* Vmean.col(2).array()).sum(),
         (Vmean.col(2).array()* Vmean.col(0).array()).sum(), (Vmean.col(2).array()* Vmean.col(1).array()).sum(), (Vmean.col(2).array()* Vmean.col(2).array()).sum();
 
-    Eigen::EigenSolver<Eigen::Matrix3d> es;
+    Eigen::EigenSolver<M33> es;
     es.compute(Covariance, true);
-    Eigen::Matrix3d EigVecs = es.pseudoEigenvectors();//'pseudo', only real part
-    Eigen::Vector3d lambdas = es.pseudoEigenvalueMatrix().diagonal();
+    M33 EigVecs = es.pseudoEigenvectors();//'pseudo', only real part
+    V3col lambdas = es.pseudoEigenvalueMatrix().diagonal();
     dbg(EigVecs) dbg(lambdas);
     EigVecs.colwise().normalize();
     dbg(EigVecs);//Rotation matrix
 
-    Eigen::Matrix4d T_orig_oobb(Eigen::Matrix4d::Identity());
+    M44 T_orig_oobb(M44::Identity());
     T_orig_oobb.topLeftCorner<3, 3>()=EigVecs;
     T_orig_oobb.topRightCorner<3, 1>() = centroid.transpose();
-    Eigen::Matrix4d T_oobb_orig = T_orig_oobb.inverse();
+    M44 T_oobb_orig = T_orig_oobb.inverse();
     Vrot = (T_oobb_orig.topLeftCorner<3, 3>() * V.transpose() + T_oobb_orig.topRightCorner<3, 1>().replicate(1, V.rows())).transpose();
     Nrot = (EigVecs.transpose() * N.transpose()).transpose();//free vector, only rotation
     return AABB(Vrot);
@@ -512,19 +529,19 @@ Eigen::Matrix<double, 2, 3> OOBB(const Eigen::MatrixX3d& V, const Eigen::MatrixX
     Fine grained outside of grid search*/
 template<bool aprox>
 bool find_closest(
-    const Eigen::MatrixX3d &P,
+    const Mx3 &P,
     const grid3d& grid,
-    const Eigen::RowVector3d& p,
+    const V3& p,
     int &idxclosest,
-    double& distclosest
+    T& distclosest
 ) {
-    double mindist = numeric_limits<double>::max();
+    T mindist = numeric_limits<double>::max();
 
-    const auto bruteforce_closest = [&](const Eigen::RowVector3d& pt)->int {
+    const auto bruteforce_closest = [&](const V3& pt)->int {
         int idx = -1;
         const auto m = P.rows();
         for (int i = 0; i < m; i++) {
-            double dist = abs((pt - P.row(i)).norm());
+            T dist = abs((pt - P.row(i)).norm());
             if (dist < mindist) {
                 mindist = dist;//avoiding conditional jumps
                 idx = i;
@@ -541,9 +558,9 @@ bool find_closest(
 
     //Inside grid
     //returns closest idx, leaves unchanged otherwise
-    const auto testbin = [&](const vector<int>& idx, const Eigen::RowVector3d& pt, int &id) {
+    const auto testbin = [&](const vector<int>& idx, const V3& pt, int &id) {
         for (auto pijk : idx) {
-            double dist(abs((P.row(pijk) - pt).norm()));
+            T dist(abs((P.row(pijk) - pt).norm()));
             if (dist < mindist) {
                 mindist = dist;
                 id = pijk;
@@ -563,7 +580,7 @@ bool find_closest(
     //at least 1 neighbour in the vicinity to interrupt iteration by increasing bin voxel dimensions
     int idx = -1;
     int n = 1;//2n+1 voxel dimension
-    Eigen::RowVector3i minvox, maxvox;
+    V3i minvox, maxvox;
     while (n<10/*@todo define stop criteria not found*/) {
         grid.truncated_voxel(p, n, minvox, maxvox);
         for (int i = minvox[0]; i <= maxvox[0]; i++) {
@@ -588,19 +605,19 @@ bool find_closest(
 /*@TODO
     outside radius search*/
 bool find_n_radius(
-    const Eigen::MatrixX3d& pts,
+    const Mx3& pts,
     const grid3d& grid,
-    const Eigen::RowVector3d& p,
-    const double radius,
+    const V3& p,
+    const T radius,
     vector<int>& idx
 ) {
     idx.clear();
 
     if (!grid.inside(p)) {//Not implemented
-        const auto bruteforce_radius = [&](const Eigen::RowVector3d& pt, const double radius, vector<int>& idx) {
+        const auto bruteforce_radius = [&](const V3& pt, const T radius, vector<int>& idx) {
             const auto m = pts.rows();
-            double radiussq(radius * radius);
-            //Eigen::VectorXd dist((((pts - pt.replicate(pts.rows(), 1)).rowwise().squaredNorm())));// .array() > Eigen::Matrix<double, 1, 1>(radiussq).replicate(pts.rows(), 1).array()).cast<int>());
+            T radiussq(radius * radius);
+            //Vxcol dist((((pts - pt.replicate(pts.rows(), 1)).rowwise().squaredNorm())));// .array() > Eigen::Matrix<double, 1, 1>(radiussq).replicate(pts.rows(), 1).array()).cast<int>());
             for (int i = 0; i < m; i++) {
                 if (((pts(i, 0) - pt[0]) * (pts(i, 0) - pt[0]) + (pts(i, 1) - pt[1]) * (pts(i, 1) - pt[1]) + (pts(i, 2) - pt[2]) * (pts(i, 2) - pt[2])) < radiussq)// < radius)//Discard real distance
                 //if(dist[i]<radiussq)
@@ -617,10 +634,10 @@ bool find_n_radius(
     
     int voxeldimminsq = ((voxel_dim-2)<0) ? 0 : ((voxel_dim - 2)* (voxel_dim - 2));
 
-    Eigen::RowVector3i minvox, maxvox;
-    double radiussqr = radius * radius;
+    V3i minvox, maxvox;
+    T radiussqr = radius * radius;
     grid.truncated_voxel(p, voxel_dim, minvox, maxvox);
-    Eigen::RowVector3i binp(grid.binpoint(p));
+    V3i binp(grid.binpoint(p));
     for (int i = minvox[0]; i <= maxvox[0]; i++) {
         for (int j = minvox[1]; j <= maxvox[1]; j++) {
             for (int k = minvox[2]; k <= maxvox[2]; k++) {
@@ -651,13 +668,13 @@ bool find_n_radius(
 //Builds a 3d grid with the vertex idx in each node
 template<bool saveVgridIdx> //compile time branch
 void spatial_indexer_3dgrid(
-    const Eigen::MatrixX3d& V,
-    const double resolution,
+    const Mx3& V,
+    const T resolution,
     grid3d &grid,
     Eigen::MatrixX2i &VgridIdx
 ) {
     auto bb = AABB(V);
-    Eigen::RowVector3d bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
+    V3 bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
 
     grid.res = resolution;
     //Grid formatting
@@ -671,10 +688,10 @@ void spatial_indexer_3dgrid(
     //for (auto& bin : grid.grid)
     //    bin.reserve(20);
 
-    const double xmin = bb(0, 0), ymin = bb(0, 1), zmin = bb(0, 2);
+    const T xmin = bb(0, 0), ymin = bb(0, 1), zmin = bb(0, 2);
     const int nx = grid.bin[0], ny = grid.bin[1], nz = grid.bin[2];
 
-    const Eigen::RowVector3d min(bb.block<1, 3>(0, 0));
+    const V3 min(bb.block<1, 3>(0, 0));
     Eigen::MatrixX3i Vidx = ((V - min.replicate(V.rows(), 1)) / grid.res).cast<int>();
     if (saveVgridIdx)
         VgridIdx.setZero(V.rows(),2);
@@ -708,39 +725,39 @@ void spatial_indexer_3dgrid(
 
 template<bool saveVgridIdx> //compile time branch
 void spatial_indexer_3dgrid(
-    const Eigen::MatrixX3d& V,
+    const Mx3& V,
     const int factor,
     grid3d& grid,
     Eigen::MatrixX2i& VgridIdx
 ) {
     //determine the resolution
     auto bb = AABB(V);
-    Eigen::RowVector3d bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
-    double resolution = bblength.minCoeff() / factor;
+    V3 bblength(bb.block<1, 3>(1, 0) - bb.block<1, 3>(0, 0));
+    T resolution = bblength.minCoeff() / factor;
     spatial_indexer_3dgrid<saveVgridIdx>(V, resolution, grid, VgridIdx);
 }
 
 void add_constraints(
-    const Eigen::MatrixX3d& V,
-    const Eigen::MatrixX3d& N_norm,
-    Eigen::MatrixX3d& Vconstr,
-    Eigen::VectorXd& Valconstr
+    const Mx3& V,
+    const Mx3& N_norm,
+    Mx3& Vconstr,
+    Vxcol& Valconstr
 ) {
     assert(V.rows() == N_norm.rows());
 
     const auto m = V.rows();
 
     auto bb = AABB(V);
-    double Epsilon = 0.01 * abs((bb.block<1, 3>(0, 0) - bb.block<1, 3>(1, 0)).norm());//Epsilon 1/100th of bb diagonal
+    T Epsilon = 0.01 * abs((bb.block<1, 3>(0, 0) - bb.block<1, 3>(1, 0)).norm());//Epsilon 1/100th of bb diagonal
 
     //Epsilon fine tuning
     //  Assuming grid res > Epsilon => closest only in the same bin
-    Eigen::MatrixX3d Vconstrloc;
+    Mx3 Vconstrloc;
     Vconstrloc.resize(m * 3, 3);
 
-    double mindist = numeric_limits<double>::max();
+    T mindist = numeric_limits<double>::max();
     bool keepgoing = true;
-    volatile double average_points_per_bin = 5;
+    volatile T average_points_per_bin = 5;
     grid3d grid;
     volatile int factor_subdivision_grid = 2;
     while(true)
@@ -768,7 +785,7 @@ void add_constraints(
         {
             Vconstrloc.block(m, 0, m, 3) = V + N_norm * Epsilon;
             Vconstrloc.block(2 * m, 0, m, 3) = V - N_norm * Epsilon;
-            double distclosest; int idxclosest = -1;
+            T distclosest; int idxclosest = -1;
             keepgoing = false;
             for (int i = 0; i < m; i++) {
                 find_closest<false>(V, grid, Vconstrloc.row(offset + i), idxclosest, distclosest);
@@ -797,14 +814,14 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
     if (key == '1') {
         // Show imported points
         viewer.data().clear();
-        viewer.core.align_camera_center(P);
+        viewer.core.align_camera_center(P.cast<double>());
         viewer.data().point_size = 11;
-        viewer.data().add_points(P, Eigen::RowVector3d(0,0,0));
+        viewer.data().add_points(P.cast<double>(), V3(0,0,0).cast<double>());
     }
     if (key == '2') {
         // Visualize current bounding box
-        Eigen::MatrixX3d Prot, Nrot;
-        Eigen::Matrix4d T_oobb_orig;
+        Mx3 Prot, Nrot;
+        M44 T_oobb_orig;
         auto bb = OOBB(P, N, Prot, Nrot);
         P = Prot;
         N = Nrot;
@@ -814,45 +831,45 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
 
     if (key == '3') {
         // Add your code for computing auxiliary constraint points here
-        Eigen::MatrixX3d Pconstr;
+        Mx3 Pconstr;
         N.rowwise().normalize();
         add_constraints(P, N, Pconstr, constrained_values);
         constrained_points = Pconstr;
         // Add code for displaying all points, as above
         viewer.data().clear();
-        viewer.core.align_camera_center(Pconstr);
+        viewer.core.align_camera_center(Pconstr.cast<double>());
         viewer.data().point_size = 11;
 
-        Eigen::MatrixXd C_rgb; 
+        Mx C_rgb; 
         C_rgb.resize(Pconstr.rows(), 3);
-        C_rgb.block(0, 0, P.rows(), 3) = Eigen::RowVector3d(1, 0, 0).replicate(P.rows(), 1);
-        C_rgb.block(P.rows(), 0, P.rows(), 3) = Eigen::RowVector3d(0, 1, 0).replicate(P.rows(), 1);
-        C_rgb.block(P.rows()*2, 0, P.rows(), 3) = Eigen::RowVector3d(0, 0, 1).replicate(P.rows(), 1);
-        viewer.data().add_points(Pconstr, C_rgb);
+        C_rgb.block(0, 0, P.rows(), 3) = V3(1, 0, 0).replicate(P.rows(), 1);
+        C_rgb.block(P.rows(), 0, P.rows(), 3) = V3(0, 1, 0).replicate(P.rows(), 1);
+        C_rgb.block(P.rows()*2, 0, P.rows(), 3) = V3(0, 0, 1).replicate(P.rows(), 1);
+        viewer.data().add_points(Pconstr.cast<double>(), C_rgb.cast<double>());
     }
 
     if (key == '4') {
         // Show grid points with colored nodes and connected with lines
         viewer.data().clear();
-        viewer.core.align_camera_center(P);
+        viewer.core.align_camera_center(P.cast<double>());
         // Add code for creating a grid
         // Add your code for evaluating the implicit function at the grid points
         // Add code for displaying points and lines
         // You can use the following example:
         //////constexpr int n = 100000;
         auto aabb(AABB(P));
-        const Eigen::RowVector3d sz(aabb.row(1) - aabb.row(0));
-        double absres = sz.minCoeff() / resolution;
+        const V3 sz(aabb.row(1) - aabb.row(0));
+        T absres = sz.minCoeff() / resolution;
         //////grid3d grid;
         //////{
         //////    Eigen::MatrixX2i VgridIdx;
         //////    spatial_indexer_3dgrid<false>(P, absres, grid, VgridIdx);
         //////}
         //////{
-        //////    const auto bruteforce_radius = [&](const Eigen::RowVector3d& pt, const double radius, vector<int> &idx) {
+        //////    const auto bruteforce_radius = [&](const V3& pt, const T radius, vector<int> &idx) {
         //////        const auto m = P.rows();
-        //////        double radiussq(radius * radius);
-        //////        //Eigen::VectorXd dist((((P - pt.replicate(P.rows(), 1)).rowwise().squaredNorm())));// .array() > Eigen::Matrix<double, 1, 1>(radiussq).replicate(P.rows(), 1).array()).cast<int>());
+        //////        T radiussq(radius * radius);
+        //////        //Vxcol dist((((P - pt.replicate(P.rows(), 1)).rowwise().squaredNorm())));// .array() > Eigen::Matrix<double, 1, 1>(radiussq).replicate(P.rows(), 1).array()).cast<int>());
         //////        for (int i = 0; i < m; i++) {
         //////            if (((P(i, 0) - pt[0]) * (P(i, 0) - pt[0]) + (P(i, 1) - pt[1]) * (P(i, 1) - pt[1]) + (P(i, 2) - pt[2]) * (P(i, 2) - pt[2])) < radiussq)// < radius)//Discard real distance
         //////            //if(dist[i]<radiussq)
@@ -861,12 +878,12 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         //////    };
         //////    /*DEBUG 3D GRID*/
         //////    auto bb = AABB(P); 
-        //////    Eigen::RowVector3d dims(bb.row(1) - bb.row(0));
+        //////    V3 dims(bb.row(1) - bb.row(0));
         //////    
         //////    
         //////    Eigen::Matrix<double, -1, 3> pts_test; pts_test.resize(n, 3);
         //////    for (int i = 0; i < n; i++) {
-        //////        pts_test.row(i) = Eigen::RowVector3d((double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX);
+        //////        pts_test.row(i) = V3((double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX, (double)rand() / (double)RAND_MAX);
         //////        pts_test.row(i) = (pts_test.row(i).array() * dims.array()).matrix() + bb.row(0);
         //////    }
         //////    cout << "ini\n";
@@ -874,13 +891,13 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         //////    vector<int> idx;
         //////    for (int i = 0; i < n; i++) {
         //////        idx.clear();
-        //////        find_n_radius(grid, Eigen::RowVector3d(pts_test.row(i)), radius, idx);
+        //////        find_n_radius(grid, V3(pts_test.row(i)), radius, idx);
         //////        idx_num_n_radius.push_back(idx.size());
         //////    }
         //////    cout << "bruteforce\n" << endl;;
         //////    for (int i = 0; i < n; i++) {
         //////        idx.clear();
-        //////        bruteforce_radius(Eigen::RowVector3d(pts_test.row(i)), radius, idx);
+        //////        bruteforce_radius(V3(pts_test.row(i)), radius, idx);
         //////        idx_num_n_brute.push_back(idx.size());
         //////    }
         //////    
@@ -889,7 +906,7 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         //////    cout << "end\n";
         //////    //    //cout << "find_n_radius\tpt" << i << "\t" << pts_test.row(i) << endl << "\tn = " << idx.size() << endl << endl;
         //////    //    idx.clear();
-        //////    //    bruteforce_radius(Eigen::RowVector3d(pts_test.row(i)), 0.25, idx);
+        //////    //    bruteforce_radius(V3(pts_test.row(i)), 0.25, idx);
         //////    //    cout << "bruteforce_radius\tpt" << i << "\t" << pts_test.row(i) << endl << "\tn = " << idx.size() << endl << endl;
         //////    //}
         //////}
@@ -902,11 +919,11 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
             spatial_indexer_3dgrid<false>(constrained_points, absres, grid, VgridIdx);
         }
 
-        const auto WeightFuncWendland = [](const double r, const double h) -> double
+        const auto WeightFuncWendland = [](const T r, const T h) -> T
         { return (4 * r / h + 1) * std::pow((1 - r / h), 4); };
-        const auto WeightFuncGauss = [](const double r, const double h) -> double
+        const auto WeightFuncGauss = [](const T r, const T h) -> T
         { return exp(-r * r / (h * h)); };
-        const auto WeightFuncSingular = [=](const double r, const double h) -> double
+        const auto WeightFuncSingular = [=](const T r, const T h) -> T
         { return (1 / (r * r + EpsilonConstr / 10)); };
 
         polyDegree = polyDegree % 3;
@@ -950,10 +967,10 @@ bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
         }
 
         igl::per_face_normals(V, F, FN);
-        viewer.data().set_mesh(V, F);
+        viewer.data().set_mesh(V.cast<double>(), F);
         viewer.data().show_lines = true;
         viewer.data().show_faces = true;
-        viewer.data().set_normals(FN);
+        viewer.data().set_normals(FN.cast<double>());
     }
 
     return true;
