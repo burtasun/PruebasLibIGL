@@ -212,9 +212,9 @@ void DrawBB(Viewer& viewer, Eigen::Matrix<double, 2, 3>& bb) {
     /*
     |z -x /y
        7 --- 8
-      /     /|
-    4 --- 3  |
-    |  5  |  6
+      /|    /|
+    4 -+- 3  |
+    |  5--|--6
     | /   | /
     1 --- 2
 
